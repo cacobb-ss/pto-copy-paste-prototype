@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "screens": [
+    {"screen_id": "01-selection-state", "frame_kind": "desktop", "label": "1. Selection State"},
+    {"screen_id": "02-copy-action", "frame_kind": "desktop", "label": "2. Copy Action"},
+    {"screen_id": "03-paste-same-page", "frame_kind": "desktop", "label": "3. Paste Same Page"},
+    {"screen_id": "04-paste-diff-page", "frame_kind": "desktop", "label": "4. Paste Diff Page"},
+    {"screen_id": "05-visual-feedback", "frame_kind": "desktop", "label": "5. Visual Feedback"}
+  ]
+}

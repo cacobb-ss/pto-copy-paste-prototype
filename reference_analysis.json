@@ -1,0 +1,199 @@
+{
+  "page_title": "Takeoff Sections Panel — Construction Quantity Takeoff Tool",
+  "layout_sections": [
+    {
+      "role": "top_toolbar",
+      "tag": "header",
+      "y_start": 0,
+      "height": 75,
+      "description": "Top bar with a green 'Sync Quantities' button with dropdown arrow and a circular avatar/profile button on the right",
+      "children": [
+        "Sync Quantities button (green, with refresh icon and dropdown arrow)",
+        "Circular profile/avatar button (dark navy border, white fill)"
+      ]
+    },
+    {
+      "role": "panel_header",
+      "tag": "nav",
+      "y_start": 75,
+      "height": 55,
+      "description": "Tab navigation with 'Takeoff' (active, underlined) and 'Sections' tabs, plus a three-dot menu icon on the right",
+      "children": [
+        "Takeoff tab (active, dark underline)",
+        "Sections tab (inactive)",
+        "Three-dot overflow menu icon"
+      ]
+    },
+    {
+      "role": "search_bar",
+      "tag": "div",
+      "y_start": 130,
+      "height": 50,
+      "description": "Search input field with magnifying glass icon and placeholder text 'Search ...'",
+      "children": [
+        "Search icon (gray)",
+        "Search input placeholder text"
+      ]
+    },
+    {
+      "role": "folder_list",
+      "tag": "section",
+      "y_start": 180,
+      "height": 1170,
+      "description": "Scrollable list of collapsible folder items representing construction categories. SILL PLATE is expanded showing sub-items with color swatches. A context menu floats over showing 'Create Subfolder' and 'Create New Key Measure' options.",
+      "children": [
+        "DOORS EXTERIOR folder (collapsed)",
+        "DOORS INTERIOR folder (collapsed)",
+        "SILL PLATE folder (expanded) with children: SILL_2x4, SILL_2x4_DOUBLE, SILL_2x6, SILL_2x6_DOUBLE, testing 1, testing 2, testing 3 — each with color swatch",
+        "Context menu popup: 'Create Subfolder', 'Create New Key Measure'",
+        "DRYWALL folder (collapsed)",
+        "INSULATION folder (collapsed)",
+        "RIM BOARD folder (collapsed)",
+        "ROOFING folder (collapsed)",
+        "SHEATHING folder (collapsed)",
+        "SIDING folder (collapsed)",
+        "STAIRS INTERIOR folder (collapsed)",
+        "STEEL POSTS folder (collapsed)",
+        "TRIM EXTERIOR folder (collapsed)",
+        "WALLS INTERIOR folder (collapsed)",
+        "WALLS EXTERIOR folder (collapsed)",
+        "WALLS GARAGE folder (collapsed)",
+        "WALLS GARAGE COMMON folder (collapsed)",
+        "WINDOWS folder (collapsed)",
+        "EWP (SKUs) folder (collapsed)"
+      ]
+    },
+    {
+      "role": "left_sidebar_controls",
+      "tag": "aside",
+      "y_start": 150,
+      "height": 700,
+      "description": "Vertical sidebar on the far left with zoom controls, pan handle, and a collapsed panel toggle button",
+      "children": [
+        "Zoom in (+) button",
+        "Zoom out (-) button",
+        "Drag/pan handle icon",
+        "Vertical slider/scrollbar",
+        "Collapsed panel expand arrow button (dark teal)"
+      ]
+    }
+  ],
+  "color_palette": {
+    "background": "#f3f4f6",
+    "nav_background": "#ffffff",
+    "primary_text": "#1a1a1a",
+    "secondary_text": "#6b7280",
+    "accent": "#22a355",
+    "surface": "#ffffff",
+    "additional": {
+      "active_tab_underline": "#1a3a5c",
+      "context_menu_bg": "#ffffff",
+      "expand_button_bg": "#1a3a5c",
+      "color_swatch_brown": "#8b4513",
+      "color_swatch_pink": "#f48fb1",
+      "color_swatch_olive": "#556b2f",
+      "color_swatch_red": "#e53935",
+      "color_swatch_yellow": "#d4c44a",
+      "folder_icon": "#9ca3af",
+      "search_border": "#e5e7eb"
+    }
+  },
+  "typography": {
+    "primary_font": "Inter, sans-serif",
+    "headline": {
+      "size": "14px",
+      "weight": "700",
+      "color": "#1a1a1a"
+    },
+    "subheadline": {
+      "size": "13px",
+      "weight": "600",
+      "color": "#1a1a1a"
+    },
+    "body": {
+      "size": "13px",
+      "weight": "400",
+      "color": "#374151"
+    },
+    "label": {
+      "size": "12px",
+      "weight": "400",
+      "color": "#6b7280"
+    }
+  },
+  "navigation": {
+    "position": "top",
+    "logo_text": null,
+    "items": [
+      "Takeoff",
+      "Sections"
+    ],
+    "cta_buttons": [
+      {
+        "label": "Sync Quantities",
+        "style": "primary"
+      }
+    ]
+  },
+  "text_content": {
+    "headline": "Takeoff",
+    "subheadline": "Sections",
+    "other_prominent_text": [
+      "Search ...",
+      "DOORS EXTERIOR",
+      "DOORS INTERIOR",
+      "SILL PLATE",
+      "SILL_2x4",
+      "SILL_2x4_DOUBLE",
+      "SILL_2x6",
+      "SILL_2x6_DOUBLE",
+      "testing 1",
+      "testing 2",
+      "testing 3",
+      "Create Subfolder",
+      "Create New Key Measure",
+      "DRYWALL",
+      "INSULATION",
+      "RIM BOARD",
+      "ROOFING",
+      "SHEATHING",
+      "SIDING",
+      "STAIRS INTERIOR",
+      "STEEL POSTS",
+      "TRIM EXTERIOR",
+      "WALLS INTERIOR",
+      "WALLS EXTERIOR",
+      "WALLS GARAGE",
+      "WALLS GARAGE COMMON",
+      "WINDOWS",
+      "EWP (SKUs)"
+    ]
+  },
+  "images_and_media": [
+    {
+      "description": "Construction plan/blueprint canvas visible behind the left sidebar panel",
+      "position": "left background",
+      "approximate_size": "90px wide, full height"
+    },
+    {
+      "description": "Circular avatar/profile button with dark navy border",
+      "position": "top right",
+      "approximate_size": "44px x 44px"
+    },
+    {
+      "description": "Folder icons (outline style) next to each category name",
+      "position": "inline with list items",
+      "approximate_size": "16px x 16px each"
+    },
+    {
+      "description": "Key/measure icons next to expanded sub-items under SILL PLATE",
+      "position": "inline with sub-list items",
+      "approximate_size": "14px x 14px each"
+    },
+    {
+      "description": "Color swatches (small squares) on the right side of each sub-item in SILL PLATE",
+      "position": "right aligned within list rows",
+      "approximate_size": "18px x 18px each"
+    }
+  ]
+}
