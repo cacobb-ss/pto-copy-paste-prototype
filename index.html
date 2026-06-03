@@ -3,88 +3,112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PTO Copy/Paste — Interactive Prototype</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>PTO · Copy / Paste Measurements Prototype</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- ===== Top Header Bar ===== -->
+
+  <!-- ===================== TOP BAR ===================== -->
   <header class="topbar">
     <div class="topbar-left">
-      <i class="fa-solid fa-cube app-logo"></i>
-      <span class="job-name">BDT House</span>
-      <span class="job-dots">•••</span>
+      <i class="fa-solid fa-ruler-combined app-logo"></i>
+      <span class="job-name">Maple Street Residence</span>
+      <span class="job-dots" title="Job menu">&#8942;</span>
     </div>
+
     <div class="topbar-center">
-      <button class="tool-btn active">Dimension Tool <i class="fa-solid fa-caret-down"></i></button>
-      <button class="tool-btn">Joist/Rafter Tool</button>
-      <button class="tool-btn">Beam/Header Tool</button>
-      <button class="tool-btn">Annotations <i class="fa-solid fa-caret-down"></i></button>
+      <button class="tool-btn"><i class="fa-solid fa-folder-open"></i> Open</button>
+      <button class="tool-btn"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+      <button class="tool-btn"><i class="fa-solid fa-file-export"></i> Export</button>
     </div>
+
     <div class="topbar-right">
-      <div class="clipboard-indicator" id="clipboard-indicator" title="Items on clipboard">
+      <div class="clipboard-indicator" id="clipboard-indicator">
         <i class="fa-solid fa-clipboard"></i>
         <span>Clipboard</span>
         <span class="clip-count" id="clip-count">0</span>
       </div>
-      <span class="sync-badge"><i class="fa-solid fa-circle-check"></i> Quantities Synced</span>
+      <div class="sync-badge"><i class="fa-solid fa-cloud-arrow-up"></i> Synced</div>
       <div class="profile-circle"></div>
     </div>
   </header>
 
+  <!-- ===================== MAIN LAYOUT ===================== -->
   <div class="main-layout">
-    <!-- ===== Left Sheets Panel ===== -->
+
+    <!-- ============ LEFT — SHEETS PANEL ============ -->
     <aside class="sheets-panel" id="sheets-panel">
       <div class="panel-header">
-        <span><i class="fa-regular fa-clone"></i> Sheets</span>
-        <span class="collapse-toggle" id="sheets-collapse" title="Collapse panel"><i class="fa-solid fa-angles-left"></i></span>
+        <span><i class="fa-regular fa-images"></i>&nbsp; Sheets</span>
+        <span class="collapse-toggle" id="sheets-collapse" title="Collapse panel">
+          <i class="fa-solid fa-angles-left"></i>
+        </span>
       </div>
       <div class="panel-body">
         <div class="search-box">
-          <i class="fa-solid fa-search"></i>
-          <input type="text" id="sheet-search" placeholder="Search sheets..." />
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="sheet-search" type="text" placeholder="Search sheets & measurements" />
         </div>
-        <ul class="sheet-list" id="sheet-list"><!-- populated by JS --></ul>
+        <ul class="sheet-list" id="sheet-list"></ul>
       </div>
     </aside>
 
-    <!-- ===== Center Canvas ===== -->
+    <!-- ============ CENTER — CANVAS ============ -->
     <main class="canvas-area">
-      <div class="canvas-content">
-        <div class="canvas-sheet">
-          <span class="sheet-corner" id="canvas-corner">Sheet</span>
-          <i class="fa-solid fa-compass-drafting sheet-watermark"></i>
-          <div class="sheet-title" id="canvas-title"></div>
+      <div class="canvas-toolbar">
+        <button class="ctool active" data-tool="select" title="Select / move (V)"><i class="fa-solid fa-arrow-pointer"></i> Select</button>
+        <button class="ctool" data-tool="pan" title="Pan (hold Space)"><i class="fa-solid fa-hand"></i> Pan</button>
+        <span style="width:1px;height:20px;background:#e0e0e0;margin:0 4px;"></span>
+        <button class="ctool" data-tool="line" title="Draw line measurement"><span class="dot" style="background:#0056b3"></span> Line</button>
+        <button class="ctool" data-tool="area" title="Draw area measurement"><span class="dot" style="background:#2e7d32"></span> Area</button>
+        <button class="ctool" data-tool="point" title="Drop point measurement"><span class="dot" style="background:#c62828;border-radius:50%"></span> Point</button>
+
+        <span class="spacer"></span>
+
+        <div class="zoom-group">
+          <button class="zoom-btn" id="zoom-out" title="Zoom out"><i class="fa-solid fa-minus"></i></button>
+          <span class="zoom-label" id="zoom-label">100%</span>
+          <button class="zoom-btn" id="zoom-in" title="Zoom in"><i class="fa-solid fa-plus"></i></button>
+          <button class="zoom-btn" id="zoom-fit" title="Fit to screen"><i class="fa-solid fa-expand"></i></button>
         </div>
       </div>
+
+      <div class="canvas-stage">
+        <div class="canvas-sheet-wrap">
+          <svg id="draw-svg" xmlns="https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Bitmap_VS_SVG.svg/1280px-Bitmap_VS_SVG.svg.png" preserveAspectRatio="xMidYMid meet"></svg>
+          <div class="sheet-tag" id="sheet-tag"></div>
+        </div>
+      </div>
+
       <div class="status-bar">
-        <span class="status-item">Scale: <b>1/4" = 1'0"</b></span>
-        <span class="status-item">Tool: <b>No Tool Selected</b></span>
+        <span class="status-item">Tool: <b>Select</b></span>
+        <span class="status-item">Scale: <b>1" = 6 px/ft</b></span>
+        <span class="status-item">Snapping <span class="on">ON</span></span>
         <span class="status-spacer"></span>
-        <span class="status-item">Toolbar <b class="on">ON</b></span>
-        <span class="status-item">Snap <b class="on">ON</b></span>
-        <span class="status-item">Ortho <b class="on">ON</b></span>
+        <span class="status-item">Click to select · Ctrl+Click multi-select · Drag to move · Ctrl+C / Ctrl+V to copy &amp; paste</span>
       </div>
     </main>
 
-    <!-- ===== Right Takeoff Panel ===== -->
+    <!-- ============ RIGHT — TAKEOFF PANEL ============ -->
     <aside class="takeoff-panel">
       <div class="panel-top-row">
         <div class="tab-bar">
           <button class="tab active" id="tab-takeoff">Takeoff</button>
           <button class="tab" id="tab-sections">Sections</button>
         </div>
-        <span class="panel-dots">•••</span>
+        <span class="panel-dots" title="Panel menu">&#8942;</span>
       </div>
       <div class="search-box">
-        <i class="fa-solid fa-search"></i>
-        <input type="text" id="tree-search" placeholder="Search takeoff items..." />
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input id="tree-search" type="text" placeholder="Search takeoff items" />
       </div>
-      <div class="takeoff-tree" id="takeoff-tree"><!-- populated by JS --></div>
+      <div class="takeoff-tree" id="takeoff-tree"></div>
     </aside>
+
   </div>
 
-  <!-- ===== Right-click Context Menu ===== -->
+  <!-- ===================== CONTEXT MENU ===================== -->
   <div class="context-menu" id="context-menu">
     <div class="ctx-item" id="ctx-copy">
       <i class="fa-solid fa-copy ctx-icon"></i>
@@ -96,23 +120,29 @@
       <span class="ctx-label">Paste</span>
       <span class="ctx-shortcut">Ctrl+V</span>
     </div>
+    <div class="ctx-item" id="ctx-edit">
+      <i class="fa-solid fa-pen ctx-icon"></i>
+      <span class="ctx-label">Edit&hellip;</span>
+      <span class="ctx-shortcut">Dbl-click</span>
+    </div>
     <div class="ctx-divider"></div>
-    <div class="ctx-item danger" id="ctx-delete">
+    <div class="ctx-item" id="ctx-delete">
       <i class="fa-solid fa-trash ctx-icon"></i>
       <span class="ctx-label">Delete</span>
       <span class="ctx-shortcut">Del</span>
     </div>
   </div>
 
-  <!-- ===== Toast container ===== -->
+  <!-- ===================== TOASTS ===================== -->
   <div class="toast-container" id="toast-container"></div>
 
-  <!-- ===== Help pill ===== -->
-  <div class="help-pill">
-    <b>Click</b> select &middot; <b>Ctrl+Click</b> toggle &middot; <b>Shift+Click</b> range &middot;
-    <b>Ctrl+C/V</b> copy/paste &middot; <b>Del</b> delete &middot; <b>Dbl-click</b> edit &middot; <b>Right-click</b> menu
+  <!-- ===================== HELP PILL ===================== -->
+  <div class="help-pill" title="Keyboard shortcuts">
+    <i class="fa-regular fa-keyboard"></i>
+    <span>Ctrl+C Copy &middot; Ctrl+V Paste &middot; Ctrl+A All &middot; Del Delete &middot; Esc Clear</span>
   </div>
 
+  <!-- ===================== SCRIPTS ===================== -->
   <script src="data.js"></script>
   <script src="app.js"></script>
 </body>
