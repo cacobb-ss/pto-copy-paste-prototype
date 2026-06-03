@@ -99,6 +99,52 @@ const MEASUREMENTS = [
 
 
 /* --------------------------------------------------------------------
+   KEY MEASURE LIBRARY (right "Takeoff" panel)
+   A catalog of measurement TYPES (templates), grouped by category folder.
+   These are NOT individual instances — no quantities, no copy/paste.
+   Each type: { name, mtype, color }
+   -------------------------------------------------------------------- */
+const KEY_MEASURE_LIBRARY = [
+  { id: "lib-sill", name: "SILL PLATE", expanded: true, types: [
+    { name: "SILL 2x4",        mtype: "line", color: "#A0522D" },
+    { name: "SILL 2x6",        mtype: "line", color: "#A0522D" },
+    { name: "SILL 2x6_DOUBLE", mtype: "line", color: "#8B4513" }
+  ]},
+  { id: "lib-walls-ext", name: "WALLS EXTERIOR", expanded: true, types: [
+    { name: "Ext Wall 2x4", mtype: "line", color: "#6c5ce7" },
+    { name: "Ext Wall 2x6", mtype: "line", color: "#1a47ba" },
+    { name: "Ext Wall 2x8", mtype: "line", color: "#23394F" }
+  ]},
+  { id: "lib-walls-int", name: "WALLS INTERIOR", expanded: true, types: [
+    { name: "Interior wall 2x4", mtype: "line", color: "#e84393" },
+    { name: "Interior wall 2x6", mtype: "line", color: "#c2185b" }
+  ]},
+  { id: "lib-doors", name: "DOORS", expanded: true, types: [
+    { name: "Interior Door 30\"",    mtype: "point", color: "#FD7E14" },
+    { name: "Interior Door 32\"",    mtype: "point", color: "#FD7E14" },
+    { name: "Front Entry Door 36\"", mtype: "point", color: "#E8590C" },
+    { name: "Patio Slider 72\"",     mtype: "point", color: "#F08C00" }
+  ]},
+  { id: "lib-windows", name: "WINDOWS", expanded: true, types: [
+    { name: "DH Window 30x48", mtype: "point", color: "#d63031" },
+    { name: "DH Window 36x60", mtype: "point", color: "#1a47ba" },
+    { name: "Fixed Window 48x48", mtype: "point", color: "#0984e3" }
+  ]},
+  { id: "lib-rooms", name: "ROOMS / SLAB", expanded: true, types: [
+    { name: "Room Floor Area", mtype: "area", color: "#21ba45" },
+    { name: "Garage Slab",     mtype: "area", color: "#F9E79F" }
+  ]},
+  { id: "lib-roofing", name: "ROOFING", expanded: false, types: [
+    { name: "Roof Slope", mtype: "area", color: "#d63031" },
+    { name: "Ridge Cap",  mtype: "line", color: "#e84393" }
+  ]},
+  { id: "lib-siding", name: "SIDING", expanded: false, types: [
+    { name: "Vinyl Siding D4", mtype: "area", color: "#808000" },
+    { name: "Vinyl Siding D5", mtype: "area", color: "#6B8E23" }
+  ]}
+];
+
+/* --------------------------------------------------------------------
    BLUEPRINT BACKGROUNDS
    Returns an SVG markup string (drawn in the same VIEW_W x VIEW_H space)
    used as a faint architectural backdrop behind the measurements.

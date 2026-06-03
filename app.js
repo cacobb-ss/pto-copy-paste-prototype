@@ -13,6 +13,7 @@ const state = {
   sheets:    JSON.parse(JSON.stringify(SHEETS)),
   sections:  JSON.parse(JSON.stringify(SECTIONS)),
   measures:  JSON.parse(JSON.stringify(MEASUREMENTS)),
+  library:   JSON.parse(JSON.stringify(KEY_MEASURE_LIBRARY)),
   activeSheetId: "sheet-1-2",
   selectedIds: new Set(),
   lastSelectedId: null,
@@ -146,6 +147,14 @@ function renderSheets() {
         if (sheet.id !== state.activeSheetId) switchSheet(sheet.id);
         selectMeasure(m.id, e);
       });
+      li.addEventListener("dblclick", (e) => { e.stopPropagation(); if (sheet.id !== state.activeSheetId) switchSheet(sheet.id); openEditModal(m.id); });
+      // right-click → copy / paste / delete context menu (LEFT panel)
+      li.addEventListener("contextmenu", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (sheet.id !== state.activeSheetId) switchSheet(sheet.id);
+        if (!state.selectedIds.has(m.id)) { state.selectedIds.clear(); state.selectedIds.add(m.id); state.lastSelectedId = m.id; renderAll(); }
+        openContextMenu(e.clientX, e.clientY);
+      });
       ul.appendChild(li);
     });
     block.appendChild(ul);
@@ -244,53 +253,50 @@ function handle(x, y, mid, h, move) {
 }
 
 // ====================================================================
-//  RENDER — right Takeoff panel (sections grouped by active-sheet)
+//  RENDER — right Takeoff panel = KEY MEASURE LIBRARY (catalog of TYPES)
+//  Shows measurement TYPES grouped by category folder. These are
+//  templates — no quantities, no copy/paste (read-only catalog).
 // ====================================================================
 function renderTree() {
   const tree = document.getElementById("takeoff-tree");
   tree.innerHTML = "";
   const q = state.treeSearch.toLowerCase();
 
-  state.sections.forEach(sec => {
-    const all = activeMeasures().filter(m => m.sectionId === sec.id);
-    const items = q ? all.filter(m => m.name.toLowerCase().includes(q) || sec.name.toLowerCase().includes(q)) : all;
-    if (all.length === 0 && !q) return;            // hide empty sections (no items on this sheet)
-    if (q && items.length === 0 && !sec.name.toLowerCase().includes(q)) return;
+  state.library.forEach(folder => {
+    const matchFolder = !q || folder.name.toLowerCase().includes(q);
+    const types = q
+      ? folder.types.filter(t => t.name.toLowerCase().includes(q) || matchFolder)
+      : folder.types;
+    if (q && !matchFolder && types.length === 0) return;
 
     const secEl = document.createElement("div");
     secEl.className = "section";
-    const expanded = q ? true : sec.expanded;
+    const expanded = q ? true : folder.expanded;
+
     const header = document.createElement("div");
     header.className = "section-header";
     header.innerHTML = `
       <span class="caret ${expanded ? "open" : ""}"><i class="fa-solid fa-caret-right"></i></span>
       <i class="fa-regular fa-folder folder-icon"></i>
-      <span class="section-name">${sec.name}</span>
-      ${all.length ? `<span class="section-count">${all.length}</span>` : ""}
+      <span class="section-name">${folder.name}</span>
+      <span class="section-count">${folder.types.length}</span>
     `;
-    header.addEventListener("click", () => { if (q) return; sec.expanded = !sec.expanded; renderTree(); });
+    header.addEventListener("click", () => { if (q) return; folder.expanded = !folder.expanded; renderTree(); });
     secEl.appendChild(header);
 
     const itemsEl = document.createElement("div");
     itemsEl.className = "section-items" + (expanded ? "" : " collapsed");
     if (expanded) {
-      items.forEach(m => {
+      types.forEach(t => {
+        const meta = MTYPE_META[t.mtype];
         const row = document.createElement("div");
-        row.className = "item-row" + (state.selectedIds.has(m.id) ? " selected" : "");
-        const meta = MTYPE_META[m.mtype];
+        row.className = "item-row lib-row";
         row.innerHTML = `
           <i class="${meta.icon} item-icon" title="${meta.label}"></i>
-          <span class="item-name" title="${m.name}">${m.name}</span>
-          <span class="item-qty">${measureLabel(m)}</span>
-          <span class="item-color" style="background:${m.color}"></span>
+          <span class="item-name" title="${t.name}">${t.name}</span>
+          <span class="item-color" style="background:${t.color}"></span>
         `;
-        row.addEventListener("click", (e) => { e.stopPropagation(); selectMeasure(m.id, e); });
-        row.addEventListener("dblclick", (e) => { e.stopPropagation(); openEditModal(m.id); });
-        row.addEventListener("contextmenu", (e) => {
-          e.preventDefault(); e.stopPropagation();
-          if (!state.selectedIds.has(m.id)) { state.selectedIds.clear(); state.selectedIds.add(m.id); state.lastSelectedId = m.id; renderAll(); }
-          openContextMenu(e.clientX, e.clientY);
-        });
+        row.title = `${t.name} · ${meta.label} key measure type`;
         itemsEl.appendChild(row);
       });
     }
@@ -299,7 +305,7 @@ function renderTree() {
   });
 
   if (!tree.children.length) {
-    tree.innerHTML = `<div class="section-empty" style="padding-left:20px">No measurements on this sheet.</div>`;
+    tree.innerHTML = `<div class="section-empty" style="padding-left:20px">No key measure types match "${state.treeSearch}".</div>`;
   }
 }
 
