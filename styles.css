@@ -142,6 +142,7 @@ html, body {
 .paste-ghost .ghost-poly { fill-opacity: .12; stroke-width: 2; stroke-dasharray: 6 4; }
 .paste-ghost .ghost-point { fill-opacity: .55; stroke: #fff; stroke-width: 2; }
 .paste-ghost .ghost-cross { stroke: var(--color-sel); stroke-width: 1.5; opacity: .9; }
+.paste-ghost .ghost-hint { fill: var(--color-sel); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: rgba(255,255,255,.85); stroke-width: 3px; }
 
 .status-bar { height: 30px; background: #fff; border-top: 1px solid var(--color-border); display: flex; align-items: center; gap: 20px; padding: 0 16px; font-size: 11px; color: #666; }
 .status-bar .status-item b { color: var(--color-primary); }

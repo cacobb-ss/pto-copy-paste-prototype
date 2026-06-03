@@ -24,7 +24,8 @@ const state = {
   view: { x: 0, y: 0, w: VIEW_W, h: VIEW_H },
   expandedSheets: new Set(["sheet-1-2"]),
   lastCanvasCursor: { x: VIEW_W / 2, y: VIEW_H / 2 }, // last known cursor in SVG coords
-  ctxPastePoint: null                                  // SVG point to use for "paste at cursor"
+  ctxPastePoint: null,                                 // SVG point to use for "paste at cursor"
+  pasteMode: false                                     // true after copy → click-to-paste active
 };
 
 let idc = 5000;
@@ -381,8 +382,33 @@ function copySelection() {
     };
   });
   updateClipboardIndicator();
+  setPasteMode(true);            // enter click-to-paste mode
   renderCanvas();
-  showToast(`${state.clipboard.length} measurement${state.clipboard.length > 1 ? "s" : ""} copied`, "success", "fa-solid fa-copy");
+  showToast(`${state.clipboard.length} measurement${state.clipboard.length > 1 ? "s" : ""} copied — click on the canvas to paste, Esc to cancel`, "success", "fa-solid fa-copy");
+}
+
+/**
+ * Enter / exit paste mode (click-to-paste). Updates the canvas cursor and ghost.
+ */
+function setPasteMode(on) {
+  state.pasteMode = !!on;
+  const svg = document.getElementById("draw-svg");
+  if (state.pasteMode) {
+    if (svg && state.tool === "select") svg.style.cursor = "copy";
+  } else {
+    removePasteGhost();
+    if (svg) svg.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "select" ? "default" : "crosshair");
+  }
+}
+
+/**
+ * Clear the clipboard and exit paste mode (used by Esc).
+ */
+function clearClipboard() {
+  state.clipboard = [];
+  setPasteMode(false);
+  updateClipboardIndicator();
+  renderCanvas();               // drop the "copied" source highlight
 }
 
 /**
@@ -440,7 +466,9 @@ function pasteClipboard(mode = "original", pt = null) {
   const sheet = state.sheets.find(s => s.id === state.activeSheetId);
   const where = mode === "cursor" ? "at cursor" : "at original location";
   const icon = mode === "cursor" ? "fa-solid fa-location-crosshairs" : "fa-solid fa-paste";
-  showToast(`${newIds.length} measurement${newIds.length > 1 ? "s" : ""} pasted ${where} on ${sheet.name}`, "success", icon);
+  // keep the clipboard so the user can place more copies; stay in paste mode (Esc clears)
+  setPasteMode(true);
+  showToast(`${newIds.length} measurement${newIds.length > 1 ? "s" : ""} pasted ${where} on ${sheet.name} — keep clicking to place more, Esc to finish`, "success", icon);
 }
 
 function deleteSelection() {
@@ -483,6 +511,13 @@ function onPointerDown(e) {
   if (state.tool === "line" || state.tool === "area" || state.tool === "point") {
     createMeasureAt(p, state.tool);
     setTool("select");
+    return;
+  }
+
+  // PASTE MODE: a left-click anywhere on the canvas drops a copy at the cursor.
+  // Clipboard is kept so the user can keep clicking to place more (Esc to finish).
+  if (state.pasteMode && state.clipboard.length) {
+    pasteClipboard("cursor", p);
     return;
   }
 
@@ -821,7 +856,8 @@ function setTool(tool) {
   state.tool = tool;
   document.querySelectorAll(".ctool[data-tool]").forEach(b => b.classList.toggle("active", b.dataset.tool === tool));
   const svg = document.getElementById("draw-svg");
-  svg.style.cursor = tool === "pan" ? "grab" : (tool === "select" ? "default" : "crosshair");
+  svg.style.cursor = tool === "pan" ? "grab"
+    : (tool === "select" ? (state.pasteMode ? "copy" : "default") : "crosshair");
 }
 function resetView() { state.view = { x: 0, y: 0, w: VIEW_W, h: VIEW_H }; }
 function zoomBy(factor, cx, cy) {
@@ -852,10 +888,19 @@ document.addEventListener("keydown", (e) => {
   else if (ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("cursor", state.lastCanvasCursor); }
   else if (ctrl && (e.key === "a" || e.key === "A")) { e.preventDefault(); selectAll(); }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
-  else if (e.key === "Escape") { closeContextMenu(); clearSelection(); }
+  else if (e.key === "Escape") {
+    closeContextMenu();
+    if (state.pasteMode || state.clipboard.length) {
+      clearClipboard();         // clear clipboard, remove ghost, exit paste mode
+      clearSelection();         // also drop any selection
+      showToast("Clipboard cleared — paste mode off", "", "fa-solid fa-ban");
+    } else {
+      clearSelection();
+    }
+  }
 });
 document.addEventListener("keyup", (e) => {
-  if (e.code === "Space") { spaceDown = false; const s = document.getElementById("draw-svg"); if (s) s.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "select" ? "default" : "crosshair"); }
+  if (e.code === "Space") { spaceDown = false; const s = document.getElementById("draw-svg"); if (s) s.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "select" ? (state.pasteMode ? "copy" : "default") : "crosshair"); }
 });
 
 // Context-menu actions
@@ -917,7 +962,8 @@ function wireCanvas() {
 function onCanvasHover(e) {
   state.lastCanvasCursor = clientToSvg(e.clientX, e.clientY);
   if (drag) { removePasteGhost(); return; }      // not while dragging
-  if (state.clipboard.length) updatePasteGhost(state.lastCanvasCursor);
+  if (state.pasteMode && state.clipboard.length) updatePasteGhost(state.lastCanvasCursor);
+  else removePasteGhost();
 }
 function ghostShape(geom, mtype, color) {
   if (mtype === "line")
@@ -947,6 +993,8 @@ function updatePasteGhost(pt) {
   // crosshair marker at the cursor (paste anchor)
   inner += `<line class="ghost-cross" x1="${pt.x - 9}" y1="${pt.y}" x2="${pt.x + 9}" y2="${pt.y}"/>
             <line class="ghost-cross" x1="${pt.x}" y1="${pt.y - 9}" x2="${pt.x}" y2="${pt.y + 9}"/>`;
+  // "Click to paste" hint next to the cursor
+  inner += `<text class="ghost-hint" x="${pt.x + 14}" y="${pt.y - 12}">Click to paste · Esc to cancel</text>`;
   g.innerHTML = inner;
 }
 function removePasteGhost() {
