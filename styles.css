@@ -23,15 +23,23 @@ html, body {
 
 /* ======= Top Header Bar ======= */
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 48px; background: #fff; border-bottom: 1px solid var(--color-border); padding: 0 16px; z-index: 100; position: relative; }
-.topbar-left { display: flex; align-items: center; gap: 10px; }
-.app-logo { color: var(--color-primary); font-size: 20px; }
-.job-name { font-weight: 700; font-size: 15px; color: var(--color-primary); }
-.job-dots { color: #888; cursor: pointer; letter-spacing: 1px; }
-.topbar-center { display: flex; gap: 4px; }
-.tool-btn { background: #f5f5f5; border: 1px solid var(--color-border); padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #3d5060; transition: all .15s; display: inline-flex; align-items: center; gap: 6px; }
-.tool-btn:hover { background: #e8e8e8; }
-.tool-btn.active { background: #e7eef6; border-color: #9bb4cc; color: var(--color-primary); }
-.topbar-right { display: flex; align-items: center; gap: 14px; }
+.topbar-left { display: flex; align-items: center; gap: 8px; min-width: 200px; }
+.job-name { font-weight: 700; font-size: 16px; color: #1f2d3d; }
+.job-dots { color: #888; cursor: pointer; letter-spacing: 1px; font-size: 16px; padding: 0 2px; }
+.job-dots:hover { color: var(--color-primary); }
+
+/* PTO center toolbar buttons */
+.topbar-center { display: flex; gap: 8px; }
+.pto-tool { background: #fff; border: 1px solid #cdd5dd; padding: 6px 13px; border-radius: 4px; cursor: pointer; font-size: 13px; color: var(--color-primary); font-weight: 600; transition: all .12s; display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.pto-tool:hover { background: #eef3f8; border-color: #9bb4cc; }
+.pto-tool .fa-caret-down { color: #6b7d90; font-size: 12px; }
+
+.topbar-right { display: flex; align-items: center; gap: 14px; min-width: 200px; justify-content: flex-end; }
+
+/* Green Sync Quantities button */
+.sync-btn { display: inline-flex; align-items: center; gap: 8px; background: #21ba45; border: none; color: #fff; padding: 8px 16px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .12s; }
+.sync-btn:hover { background: #1ea83e; }
+.sync-btn .sync-caret { border-left: 1px solid rgba(255,255,255,.35); padding-left: 8px; margin-left: 2px; font-size: 11px; }
 .clipboard-indicator { display: flex; align-items: center; gap: 6px; background: #eef2f7; border: 1px solid #c9d6e3; color: var(--color-primary); padding: 4px 12px; border-radius: 14px; font-size: 12px; font-weight: 600; opacity: 0; transform: translateY(-2px); transition: all .2s; pointer-events: none; }
 .clipboard-indicator.active { opacity: 1; transform: translateY(0); }
 .clipboard-indicator i { color: var(--color-info); }
@@ -86,6 +94,8 @@ html, body {
 .ctool.active { background: #e7eef6; border-color: #9bb4cc; color: var(--color-primary); font-weight: 600; }
 .ctool .dot { width: 9px; height: 9px; border-radius: 2px; }
 .canvas-toolbar .spacer { flex: 1; }
+.canvas-hint { font-size: 12px; color: #7f8c99; display: inline-flex; align-items: center; gap: 7px; }
+.canvas-hint i { color: #9bb4cc; }
 .zoom-group { display: flex; align-items: center; gap: 4px; }
 .zoom-btn { width: 26px; height: 26px; border: 1px solid var(--color-border); background: #fff; border-radius: 4px; cursor: pointer; color: #3d5060; font-size: 12px; }
 .zoom-btn:hover { background: #eef3f8; }

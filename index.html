@@ -12,15 +12,15 @@
   <!-- ===================== TOP BAR ===================== -->
   <header class="topbar">
     <div class="topbar-left">
-      <i class="fa-solid fa-ruler-combined app-logo"></i>
-      <span class="job-name">Maple Street Residence</span>
-      <span class="job-dots" title="Job menu">&#8942;</span>
+      <span class="job-name">BDT House</span>
+      <span class="job-dots" title="Job menu">&#8943;</span>
     </div>
 
     <div class="topbar-center">
-      <button class="tool-btn"><i class="fa-solid fa-folder-open"></i> Open</button>
-      <button class="tool-btn"><i class="fa-solid fa-floppy-disk"></i> Save</button>
-      <button class="tool-btn"><i class="fa-solid fa-file-export"></i> Export</button>
+      <button class="pto-tool"><span>Dimension Tool</span> <i class="fa-solid fa-caret-down"></i></button>
+      <button class="pto-tool"><span>Joist/Rafter Tool</span></button>
+      <button class="pto-tool"><span>Beam/Header Tool</span></button>
+      <button class="pto-tool"><span>Annotations</span> <i class="fa-solid fa-caret-down"></i></button>
     </div>
 
     <div class="topbar-right">
@@ -29,7 +29,7 @@
         <span>Clipboard</span>
         <span class="clip-count" id="clip-count">0</span>
       </div>
-      <div class="sync-badge"><i class="fa-solid fa-cloud-arrow-up"></i> Synced</div>
+      <button class="sync-btn"><i class="fa-solid fa-arrows-rotate"></i> Sync Quantities <span class="sync-caret"><i class="fa-solid fa-caret-down"></i></span></button>
       <div class="profile-circle"></div>
     </div>
   </header>
@@ -57,12 +57,7 @@
     <!-- ============ CENTER — CANVAS ============ -->
     <main class="canvas-area">
       <div class="canvas-toolbar">
-        <button class="ctool active" data-tool="select" title="Select / move (V)"><i class="fa-solid fa-arrow-pointer"></i> Select</button>
-        <button class="ctool" data-tool="pan" title="Pan (hold Space)"><i class="fa-solid fa-hand"></i> Pan</button>
-        <span style="width:1px;height:20px;background:#e0e0e0;margin:0 4px;"></span>
-        <button class="ctool" data-tool="line" title="Draw line measurement"><span class="dot" style="background:#0056b3"></span> Line</button>
-        <button class="ctool" data-tool="area" title="Draw area measurement"><span class="dot" style="background:#2e7d32"></span> Area</button>
-        <button class="ctool" data-tool="point" title="Drop point measurement"><span class="dot" style="background:#c62828;border-radius:50%"></span> Point</button>
+        <span class="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click a measurement to select &middot; drag to move &middot; Ctrl+C / Ctrl+V to copy &amp; paste</span>
 
         <span class="spacer"></span>
 
