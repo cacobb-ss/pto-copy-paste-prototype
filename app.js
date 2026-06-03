@@ -22,7 +22,9 @@ const state = {
   treeSearch: "",
   tool: "select",                // select | pan | line | area | point
   view: { x: 0, y: 0, w: VIEW_W, h: VIEW_H },
-  expandedSheets: new Set(["sheet-1-2"])
+  expandedSheets: new Set(["sheet-1-2"]),
+  lastCanvasCursor: { x: VIEW_W / 2, y: VIEW_H / 2 }, // last known cursor in SVG coords
+  ctxPastePoint: null                                  // SVG point to use for "paste at cursor"
 };
 
 let idc = 5000;
@@ -65,6 +67,22 @@ function offsetGeom(geom, mtype, dx, dy) {
   if (mtype === "line")  return { x1: geom.x1 + dx, y1: geom.y1 + dy, x2: geom.x2 + dx, y2: geom.y2 + dy };
   if (mtype === "area")  return { points: geom.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
   return { x: geom.x + dx, y: geom.y + dy, count: geom.count };
+}
+// center point of a geometry (line midpoint / polygon centroid / point itself)
+function geomCenter(geom, mtype) {
+  if (mtype === "line")  return { x: (geom.x1 + geom.x2) / 2, y: (geom.y1 + geom.y2) / 2 };
+  if (mtype === "area")  return centroid(geom.points);
+  return { x: geom.x, y: geom.y };
+}
+// center of a group of clipboard items (average of their centers)
+function clipboardGroupCenter(clips) {
+  const cs = clips.map(c => geomCenter(c.geom, c.mtype));
+  const sum = cs.reduce((a, p) => ({ x: a.x + p.x, y: a.y + p.y }), { x: 0, y: 0 });
+  return { x: sum.x / cs.length, y: sum.y / cs.length };
+}
+// current center of the SVG viewport in user units
+function viewportCenter() {
+  return { x: state.view.x + state.view.w / 2, y: state.view.y + state.view.h / 2 };
 }
 
 // ===== derived getters =====
@@ -153,7 +171,8 @@ function renderSheets() {
         e.preventDefault(); e.stopPropagation();
         if (sheet.id !== state.activeSheetId) switchSheet(sheet.id);
         if (!state.selectedIds.has(m.id)) { state.selectedIds.clear(); state.selectedIds.add(m.id); state.lastSelectedId = m.id; renderAll(); }
-        openContextMenu(e.clientX, e.clientY);
+        // left panel has no cursor over the canvas → use last known canvas cursor / viewport center
+        openContextMenu(e.clientX, e.clientY, state.lastCanvasCursor || viewportCenter());
       });
       ul.appendChild(li);
     });
@@ -366,12 +385,35 @@ function copySelection() {
   showToast(`${state.clipboard.length} measurement${state.clipboard.length > 1 ? "s" : ""} copied`, "success", "fa-solid fa-copy");
 }
 
-function pasteClipboard() {
+/**
+ * Paste clipboard items.
+ * @param {"original"|"cursor"} mode
+ *   - "original": keep original coords (same-sheet nudged by 36px so the copy is visible)
+ *   - "cursor":   center the copied group at `pt` (or last known canvas cursor)
+ * @param {{x:number,y:number}|null} pt  target point in SVG user units (cursor mode)
+ */
+function pasteClipboard(mode = "original", pt = null) {
   if (!state.clipboard.length) { showToast("Clipboard is empty", "error", "fa-solid fa-triangle-exclamation"); return; }
+
+  // For cursor mode, work out a single group offset so relative positions are kept
+  let groupDx = 0, groupDy = 0;
+  if (mode === "cursor") {
+    const target = pt || state.lastCanvasCursor || viewportCenter();
+    const gc = clipboardGroupCenter(state.clipboard);
+    groupDx = target.x - gc.x;
+    groupDy = target.y - gc.y;
+  }
+
   const newIds = [];
   state.clipboard.forEach(clip => {
     const sameSheet = clip._sourceSheetId === state.activeSheetId;
-    const dx = sameSheet ? 36 : 0, dy = sameSheet ? 36 : 0;
+    let dx, dy;
+    if (mode === "cursor") {
+      dx = groupDx; dy = groupDy;
+    } else {
+      // original location: nudge same-sheet copies so they don't sit exactly on top
+      dx = sameSheet ? 36 : 0; dy = sameSheet ? 36 : 0;
+    }
     const sectionId = state.sections.some(s => s.id === clip.sectionId) ? clip.sectionId : state.sections[0].id;
     const nm = {
       id: nextId(),
@@ -396,7 +438,9 @@ function pasteClipboard() {
     if (g) g.classList.add("just-pasted");
   });
   const sheet = state.sheets.find(s => s.id === state.activeSheetId);
-  showToast(`${newIds.length} measurement${newIds.length > 1 ? "s" : ""} pasted to ${sheet.name}`, "success", "fa-solid fa-paste");
+  const where = mode === "cursor" ? "at cursor" : "at original location";
+  const icon = mode === "cursor" ? "fa-solid fa-location-crosshairs" : "fa-solid fa-paste";
+  showToast(`${newIds.length} measurement${newIds.length > 1 ? "s" : ""} pasted ${where} on ${sheet.name}`, "success", icon);
 }
 
 function deleteSelection() {
@@ -603,7 +647,9 @@ function onCanvasContextMenu(e) {
   } else {
     clearSelection();
   }
-  openContextMenu(e.clientX, e.clientY);
+  const svgPt = clientToSvg(e.clientX, e.clientY);
+  state.lastCanvasCursor = svgPt;
+  openContextMenu(e.clientX, e.clientY, svgPt);
 }
 // Double-click on canvas measurement → edit
 function onCanvasDblClick(e) {
@@ -632,16 +678,23 @@ function createMeasureAt(p, type) {
 // ====================================================================
 //  CONTEXT MENU
 // ====================================================================
-function openContextMenu(x, y) {
+function openContextMenu(x, y, pastePoint) {
   const menu = document.getElementById("context-menu");
   const hasSel = state.selectedIds.size > 0;
   const hasClip = state.clipboard.length > 0;
-  setCtx("ctx-copy", hasSel); setCtx("ctx-paste", hasClip);
+  // remember where a "Paste at Cursor" should land (canvas: exact cursor;
+  // left-panel: last known canvas cursor; fallback: viewport center)
+  state.ctxPastePoint = pastePoint || state.lastCanvasCursor || viewportCenter();
+  setCtx("ctx-copy", hasSel);
+  setCtx("ctx-paste-cursor", hasClip); setCtx("ctx-paste", hasClip);
   setCtx("ctx-edit", state.selectedIds.size === 1); setCtx("ctx-delete", hasSel);
   const n = state.selectedIds.size;
+  const clipN = state.clipboard.length;
+  const clipSuffix = clipN > 1 ? ` ${clipN} items` : "";
   document.querySelector("#ctx-copy .ctx-label").textContent = n > 1 ? `Copy ${n} items` : "Copy";
   document.querySelector("#ctx-delete .ctx-label").textContent = n > 1 ? `Delete ${n} items` : "Delete";
-  document.querySelector("#ctx-paste .ctx-label").textContent = hasClip ? `Paste ${state.clipboard.length} item${state.clipboard.length > 1 ? "s" : ""}` : "Paste";
+  document.querySelector("#ctx-paste-cursor .ctx-label").textContent = `Paste${clipSuffix} at Cursor`;
+  document.querySelector("#ctx-paste .ctx-label").textContent = `Paste${clipSuffix} at Original Location`;
   menu.classList.add("open");
   const rect = menu.getBoundingClientRect();
   menu.style.left = Math.min(x, window.innerWidth - rect.width - 8) + "px";
@@ -795,7 +848,8 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Space") { spaceDown = true; const s = document.getElementById("draw-svg"); if (s && state.tool !== "pan") s.style.cursor = "grab"; }
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
-  else if (ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard(); }
+  else if (ctrl && e.shiftKey && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("original"); }
+  else if (ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("cursor", state.lastCanvasCursor); }
   else if (ctrl && (e.key === "a" || e.key === "A")) { e.preventDefault(); selectAll(); }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
   else if (e.key === "Escape") { closeContextMenu(); clearSelection(); }
@@ -806,7 +860,8 @@ document.addEventListener("keyup", (e) => {
 
 // Context-menu actions
 document.getElementById("ctx-copy").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); copySelection(); } });
-document.getElementById("ctx-paste").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); pasteClipboard(); } });
+document.getElementById("ctx-paste-cursor").addEventListener("click", function () { if (!this.classList.contains("disabled")) { const pt = state.ctxPastePoint; closeContextMenu(); pasteClipboard("cursor", pt); } });
+document.getElementById("ctx-paste").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); pasteClipboard("original"); } });
 document.getElementById("ctx-edit").addEventListener("click", function () { if (!this.classList.contains("disabled")) { const id = [...state.selectedIds][0]; closeContextMenu(); openEditModal(id); } });
 document.getElementById("ctx-delete").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); deleteSelection(); } });
 
@@ -847,10 +902,56 @@ function wireCanvas() {
   document.addEventListener("pointerup", onPointerUp);
   svg.addEventListener("contextmenu", onCanvasContextMenu);
   svg.addEventListener("dblclick", onCanvasDblClick);
+  // track cursor over canvas + show paste ghost preview
+  svg.addEventListener("pointermove", onCanvasHover);
+  svg.addEventListener("pointerleave", removePasteGhost);
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
     zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY);
   }, { passive: false });
+}
+
+// ====================================================================
+//  PASTE GHOST PREVIEW (follows cursor while clipboard has items)
+// ====================================================================
+function onCanvasHover(e) {
+  state.lastCanvasCursor = clientToSvg(e.clientX, e.clientY);
+  if (drag) { removePasteGhost(); return; }      // not while dragging
+  if (state.clipboard.length) updatePasteGhost(state.lastCanvasCursor);
+}
+function ghostShape(geom, mtype, color) {
+  if (mtype === "line")
+    return `<line class="ghost-line" stroke="${color}" x1="${geom.x1}" y1="${geom.y1}" x2="${geom.x2}" y2="${geom.y2}"/>`;
+  if (mtype === "area")
+    return `<polygon class="ghost-poly" points="${geom.points.map(p => `${p.x},${p.y}`).join(" ")}" fill="${color}" stroke="${color}"/>`;
+  return `<circle class="ghost-point" cx="${geom.x}" cy="${geom.y}" r="12" fill="${color}"/>`;
+}
+function updatePasteGhost(pt) {
+  const svg = document.getElementById("draw-svg");
+  if (!svg) return;
+  let g = document.getElementById("paste-ghost");
+  if (!g) {
+    g = document.createElementNS(SVG_NS, "g");
+    g.id = "paste-ghost";
+    g.setAttribute("class", "paste-ghost");
+    g.setAttribute("pointer-events", "none");
+    svg.appendChild(g);
+  }
+  const gc = clipboardGroupCenter(state.clipboard);
+  const dx = pt.x - gc.x, dy = pt.y - gc.y;
+  let inner = "";
+  state.clipboard.forEach(clip => {
+    const geom = offsetGeom(JSON.parse(JSON.stringify(clip.geom)), clip.mtype, dx, dy);
+    inner += ghostShape(geom, clip.mtype, clip.color);
+  });
+  // crosshair marker at the cursor (paste anchor)
+  inner += `<line class="ghost-cross" x1="${pt.x - 9}" y1="${pt.y}" x2="${pt.x + 9}" y2="${pt.y}"/>
+            <line class="ghost-cross" x1="${pt.x}" y1="${pt.y - 9}" x2="${pt.x}" y2="${pt.y + 9}"/>`;
+  g.innerHTML = inner;
+}
+function removePasteGhost() {
+  const g = document.getElementById("paste-ghost");
+  if (g) g.remove();
 }
 
 // ===== Init =====

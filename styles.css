@@ -136,6 +136,13 @@ html, body {
 /* Rubber-band selection box */
 .rubber-band { fill: rgba(21,101,192,0.10); stroke: var(--color-sel); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
 
+/* Paste-at-cursor ghost preview */
+.paste-ghost { opacity: .55; pointer-events: none; }
+.paste-ghost .ghost-line { stroke-width: 3; stroke-dasharray: 6 4; opacity: .8; }
+.paste-ghost .ghost-poly { fill-opacity: .12; stroke-width: 2; stroke-dasharray: 6 4; }
+.paste-ghost .ghost-point { fill-opacity: .55; stroke: #fff; stroke-width: 2; }
+.paste-ghost .ghost-cross { stroke: var(--color-sel); stroke-width: 1.5; opacity: .9; }
+
 .status-bar { height: 30px; background: #fff; border-top: 1px solid var(--color-border); display: flex; align-items: center; gap: 20px; padding: 0 16px; font-size: 11px; color: #666; }
 .status-bar .status-item b { color: var(--color-primary); }
 .status-bar .on { color: #1b5e20; background: #c8e6c9; padding: 1px 7px; border-radius: 3px; font-size: 10px; font-weight: 700; }

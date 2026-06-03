@@ -57,7 +57,7 @@
     <!-- ============ CENTER — CANVAS ============ -->
     <main class="canvas-area">
       <div class="canvas-toolbar">
-        <span class="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click a measurement to select &middot; drag to move &middot; Ctrl+C / Ctrl+V to copy &amp; paste</span>
+        <span class="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click to select &middot; drag to move &middot; Ctrl+C copy &middot; right-click for Paste at Cursor / Original</span>
 
         <span class="spacer"></span>
 
@@ -110,10 +110,15 @@
       <span class="ctx-label">Copy</span>
       <span class="ctx-shortcut">Ctrl+C</span>
     </div>
+    <div class="ctx-item" id="ctx-paste-cursor">
+      <i class="fa-solid fa-location-crosshairs ctx-icon"></i>
+      <span class="ctx-label">Paste at Cursor</span>
+      <span class="ctx-shortcut">Ctrl+V</span>
+    </div>
     <div class="ctx-item" id="ctx-paste">
       <i class="fa-solid fa-paste ctx-icon"></i>
-      <span class="ctx-label">Paste</span>
-      <span class="ctx-shortcut">Ctrl+V</span>
+      <span class="ctx-label">Paste at Original Location</span>
+      <span class="ctx-shortcut">Ctrl+Shift+V</span>
     </div>
     <div class="ctx-item" id="ctx-edit">
       <i class="fa-solid fa-pen ctx-icon"></i>
@@ -134,7 +139,7 @@
   <!-- ===================== HELP PILL ===================== -->
   <div class="help-pill" title="Keyboard shortcuts">
     <i class="fa-regular fa-keyboard"></i>
-    <span>Ctrl+C Copy &middot; Ctrl+V Paste &middot; Ctrl+A All &middot; Del Delete &middot; Esc Clear</span>
+    <span>Ctrl+C Copy &middot; Ctrl+V Paste at Cursor &middot; Ctrl+Shift+V Paste at Original &middot; Ctrl+A All &middot; Del Delete &middot; Esc Clear</span>
   </div>
 
   <!-- ===================== SCRIPTS ===================== -->
