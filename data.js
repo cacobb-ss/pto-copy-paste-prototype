@@ -42,6 +42,20 @@ const COLOR_SWATCHES = [
   "#1a47ba", "#6c5ce7", "#e84393", "#21ba45", "#d63031", "#23394F"
 ];
 
+// ---- "Use (Optional)" dropdown options ----
+const USE_OPTIONS = [
+  "Bearing wall",
+  "Non-bearing wall",
+  "Header",
+  "Carry beam",
+  "Floor framing",
+  "Roof framing",
+  "Rim / Band",
+  "Blocking",
+  "Sheathing",
+  "Trim"
+];
+
 // type → metadata
 const MTYPE_META = {
   line:  { icon: "fa-solid fa-ruler",          label: "Linear",      unit: "LF" },

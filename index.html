@@ -57,25 +57,9 @@
     <!-- ============ CENTER — CANVAS ============ -->
     <main class="canvas-area">
       <div class="canvas-toolbar">
-        <div class="tool-group">
-          <button class="ctool active" id="tool-select" data-tool="select" title="Select tool (V) — click to select, Ctrl/Shift+click to multi-select, drag empty space to box-select">
-            <i class="fa-regular fa-hand-pointer"></i> Select
-          </button>
-          <button class="ctool" id="tool-move" data-tool="move" title="Move tool (M) — drag measurements to reposition them">
-            <i class="fa-solid fa-up-down-left-right"></i> Move
-          </button>
-          <button class="ctool" id="tool-pan" data-tool="pan" title="Pan tool (H) — drag to pan the sheet">
-            <i class="fa-solid fa-hand"></i> Pan
-          </button>
-        </div>
-        <span class="tool-sep"></span>
-        <button class="ctool combine-btn" id="btn-combine" data-tool="" title="Combine selected measurements that share the same Key Measure name" disabled>
-          <i class="fa-solid fa-object-group"></i> Combine Same KM
-        </button>
+        <span class="canvas-hint" id="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click to select &middot; drag to move &middot; Ctrl-drag to box-select &middot; Ctrl+C copy then click to paste</span>
 
         <span class="spacer"></span>
-
-        <span class="canvas-hint" id="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click to select &middot; Ctrl-drag to box-select &middot; Ctrl+C copy then click to paste</span>
 
         <div class="zoom-group">
           <button class="zoom-btn" id="zoom-out" title="Zoom out"><i class="fa-solid fa-minus"></i></button>
@@ -97,7 +81,6 @@
       </div>
 
       <div class="status-bar">
-        <span class="status-item">Tool: <b id="status-tool">Select</b></span>
         <span class="status-item">Scale: <b>1" = 6 px/ft</b></span>
         <span class="status-item">Snapping <span class="on" id="status-snap">ON</span></span>
         <span class="status-spacer"></span>
@@ -142,8 +125,13 @@
     </div>
     <div class="ctx-item" id="ctx-edit">
       <i class="fa-solid fa-pen ctx-icon"></i>
-      <span class="ctx-label">Edit&hellip;</span>
+      <span class="ctx-label">Edit Properties&hellip;</span>
       <span class="ctx-shortcut">Dbl-click</span>
+    </div>
+    <div class="ctx-item" id="ctx-combine">
+      <i class="fa-solid fa-object-group ctx-icon"></i>
+      <span class="ctx-label">Combine Measurements</span>
+      <span class="ctx-shortcut"></span>
     </div>
     <div class="ctx-divider"></div>
     <div class="ctx-item" id="ctx-delete">
@@ -170,7 +158,7 @@
   <!-- ===================== HELP PILL ===================== -->
   <div class="help-pill" title="Keyboard shortcuts">
     <i class="fa-regular fa-keyboard"></i>
-    <span>V Select &middot; M Move &middot; Ctrl+C Copy then click to paste &middot; Ctrl+V at Cursor &middot; Ctrl+Shift+V at Original &middot; Ctrl-drag Box-select &middot; Esc Finalize/Exit</span>
+    <span>Click to select &middot; drag to move &middot; Ctrl-drag Box-select &middot; Ctrl+C Copy then click to paste &middot; Ctrl+V at Cursor &middot; Ctrl+Shift+V at Original &middot; Esc Finalize/Exit</span>
   </div>
 
   <!-- ===================== SCRIPTS ===================== -->

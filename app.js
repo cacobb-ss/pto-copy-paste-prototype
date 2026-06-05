@@ -64,9 +64,11 @@ function geomQty(m) {
   if (m.mtype === "area")  return polyFeet2(m.geom.points);
   return m.geom.count || 1;
 }
-// effective quantity = qtyOverride (set by combine / merge) if present, else geometric
+// effective quantity = qtyOverride (set by combine / merge) if present, else geometric × multiplier
 function measureQty(m) {
-  return (m.qtyOverride != null) ? m.qtyOverride : geomQty(m);
+  const base = (m.qtyOverride != null) ? m.qtyOverride : geomQty(m);
+  const mult = (m.multiplier != null && m.multiplier > 0) ? m.multiplier : 1;
+  return base * mult;
 }
 function measureLabel(m) {
   const unit = MTYPE_META[m.mtype].unit;
@@ -195,10 +197,18 @@ function renderSheets() {
         <span class="m-name" title="${m.name}">${m.name}</span>
         <span class="m-qty">${measureLabel(m)}</span>
         <span class="m-swatch" style="background:${m.color}"></span>
+        <button class="row-ellipsis" title="More actions" aria-label="More actions">&#8943;</button>
       `;
       li.addEventListener("click", (e) => {
+        if (e.target.closest(".row-ellipsis")) return; // handled separately
         if (sheet.id !== state.activeSheetId) switchSheet(sheet.id);
         selectMeasure(m.id, e);
+      });
+      const ell = li.querySelector(".row-ellipsis");
+      ell.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (sheet.id !== state.activeSheetId) switchSheet(sheet.id);
+        openRowMenu(m.id, ell);
       });
       li.addEventListener("dblclick", (e) => { e.stopPropagation(); if (sheet.id !== state.activeSheetId) switchSheet(sheet.id); openEditModal(m.id); });
       // right-click → copy / paste / delete context menu (LEFT panel)
@@ -329,8 +339,9 @@ function joistTicks(g) {
 
 function selectionSvg(m) {
   let s = "";
-  // Resize/move handles only appear in Move mode (gated editing).
-  const showHandles = state.tool === "move" || state.pasteMode;
+  // Resize/move handles are always shown on a selected measurement
+  // (no tool modes — measurements are directly editable when selected).
+  const showHandles = !state.pasteMode;
   if (isLineGeom(m.mtype)) {
     s += `<line class="sel-outline-line" x1="${m.geom.x1}" y1="${m.geom.y1}" x2="${m.geom.x2}" y2="${m.geom.y2}"/>`;
     if (showHandles) {
@@ -474,10 +485,10 @@ function setPasteMode(on) {
   state.pasteMode = !!on;
   const svg = document.getElementById("draw-svg");
   if (state.pasteMode) {
-    if (svg && state.tool === "select") svg.style.cursor = "copy";
+    if (svg) svg.style.cursor = "copy";
   } else {
     removePasteGhost();
-    if (svg) svg.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "move" ? "move" : (state.tool === "select" ? "default" : "crosshair"));
+    if (svg) svg.style.cursor = "default";
   }
   updateModeIndicator();
   updateStatusBar();
@@ -668,8 +679,8 @@ function onPointerDown(e) {
   const svg = document.getElementById("draw-svg");
   const p = clientToSvg(e.clientX, e.clientY);
 
-  // PAN: pan tool, middle button, or space held
-  if (state.tool === "pan" || e.button === 1 || spaceDown) {
+  // PAN: middle button or space held (no dedicated pan tool anymore)
+  if (e.button === 1 || spaceDown) {
     drag = { mode: "pan", startClient: { x: e.clientX, y: e.clientY }, startView: { ...state.view } };
     svg.classList.add("panning");
     svg.setPointerCapture(e.pointerId);
@@ -677,13 +688,6 @@ function onPointerDown(e) {
     return;
   }
   if (e.button !== 0) return;
-
-  // CREATE tools
-  if (state.tool === "line" || state.tool === "area" || state.tool === "point") {
-    createMeasureAt(p, state.tool);
-    setTool("select");
-    return;
-  }
 
   // PASTE MODE: a left-click anywhere on the canvas drops a copy at the cursor.
   // Clipboard is kept so the user can keep clicking to place more (Esc to finish).
@@ -694,9 +698,9 @@ function onPointerDown(e) {
 
   const mod = e.shiftKey || e.ctrlKey || e.metaKey;
 
-  // RESIZE handle? (resize is only active in MOVE mode; handles aren't shown otherwise)
+  // RESIZE handle? (handles are always shown on a selected measurement)
   const handleEl = e.target.closest(".handle");
-  if (handleEl && state.tool === "move" && !mod) {
+  if (handleEl && !mod) {
     const mid = handleEl.dataset.mid, h = handleEl.dataset.handle;
     const m = getMeasure(mid);
     drag = { mode: "resize", mid, handle: h, start: p,
@@ -705,24 +709,22 @@ function onPointerDown(e) {
     return;
   }
 
-  // MEASUREMENT body with a modifier → multi-select toggle / range (works in any tool)
+  // MEASUREMENT body with a modifier → multi-select toggle / range
   const g = e.target.closest(".meas");
   if (g && mod) { selectMeasure(g.dataset.mid, e); return; }
 
-  // MEASUREMENT body, no modifier
+  // MEASUREMENT body, no modifier → select (if needed) then begin a direct move-drag.
+  // A click without movement collapses the selection to just this measurement.
   if (g) {
     const mid = g.dataset.mid;
-    if (state.tool === "move") {
-      // MOVE mode → select (if needed) then begin dragging all selected
-      if (!state.selectedIds.has(mid)) {
-        state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid; renderAll();
-      }
-      beginMove(p, e.pointerId);
-      return;
+    const wasSelected = state.selectedIds.has(mid);
+    if (!wasSelected) {
+      state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid; renderAll();
     }
-    // SELECT mode → click selects only; dragging-to-move is gated OFF (use the Move tool)
-    state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid;
-    closeContextMenu(); renderAll();
+    closeContextMenu();
+    beginMove(p, e.pointerId);
+    drag.clickMid = mid;          // remember for click-vs-drag resolution on pointer-up
+    drag.multiWasSelected = wasSelected && state.selectedIds.size > 1;
     return;
   }
 
@@ -831,6 +833,11 @@ function onPointerUp(e) {
       renderAll();
       const n = state.selectedIds.size;
       showToast(`Moved ${n} measurement${n > 1 ? "s" : ""}`, "info", "fa-solid fa-up-down-left-right");
+    } else if (drag.clickMid && drag.multiWasSelected) {
+      // A plain click (no drag) on an already-multi-selected item collapses
+      // the selection down to just that one measurement.
+      state.selectedIds.clear(); state.selectedIds.add(drag.clickMid); state.lastSelectedId = drag.clickMid;
+      renderAll();
     }
     drag = null;
     return;
@@ -1009,6 +1016,7 @@ function openContextMenu(x, y, pastePoint) {
   setCtx("ctx-copy", hasSel);
   setCtx("ctx-paste-cursor", hasClip); setCtx("ctx-paste", hasClip);
   setCtx("ctx-edit", state.selectedIds.size === 1); setCtx("ctx-delete", hasSel);
+  setCtx("ctx-combine", state.selectedIds.size >= 2);
   const n = state.selectedIds.size;
   const clipN = state.clipboard.length;
   const clipSuffix = clipN > 1 ? ` ${clipN} items` : "";
@@ -1025,81 +1033,226 @@ function setCtx(id, on) { document.getElementById(id).classList.toggle("disabled
 function closeContextMenu() { document.getElementById("context-menu").classList.remove("open"); }
 
 // ====================================================================
-//  EDIT MODAL
+//  ROW ELLIPSIS MENU (left panel per-measurement actions)
+// ====================================================================
+function closeRowMenu() {
+  const existing = document.getElementById("row-menu");
+  if (existing) existing.remove();
+}
+function openRowMenu(id, anchorEl) {
+  closeRowMenu();
+  closeContextMenu();
+  const m = getMeasure(id);
+  if (!m) return;
+  const menu = document.createElement("div");
+  menu.className = "row-menu";
+  menu.id = "row-menu";
+  menu.innerHTML = `
+    <div class="rm-item" data-act="edit"><i class="fa-solid fa-pen"></i> Edit Properties</div>
+    <div class="rm-item danger" data-act="delete"><i class="fa-solid fa-trash"></i> Delete</div>
+  `;
+  document.body.appendChild(menu);
+  const r = anchorEl.getBoundingClientRect();
+  const mr = menu.getBoundingClientRect();
+  let left = r.right - mr.width;
+  let top = r.bottom + 4;
+  if (top + mr.height > window.innerHeight - 8) top = r.top - mr.height - 4;
+  if (left < 8) left = 8;
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+  menu.querySelector('[data-act="edit"]').addEventListener("click", () => {
+    closeRowMenu();
+    openEditModal(id);
+  });
+  menu.querySelector('[data-act="delete"]').addEventListener("click", () => {
+    closeRowMenu();
+    state.measures = state.measures.filter(x => x.id !== id);
+    state.selectedIds.delete(id);
+    if (state.lastSelectedId === id) state.lastSelectedId = null;
+    renderAll();
+    showToast("Measurement deleted", "success", "fa-solid fa-trash");
+  });
+}
+
+// ====================================================================
+//  PROPERTIES FORM (shared by Edit Properties + Combine modals)
+// ====================================================================
+// unique Key-Measure library type names + color lookup
+function kmLibraryNames() {
+  const names = [];
+  KEY_MEASURE_LIBRARY.forEach(folder => folder.types.forEach(t => {
+    if (!names.includes(t.name)) names.push(t.name);
+  }));
+  return names;
+}
+function kmColorFor(name) {
+  for (const folder of KEY_MEASURE_LIBRARY) {
+    for (const t of folder.types) if (t.name === name) return t.color;
+  }
+  return null;
+}
+// display label for the read-only "Measurement Type" field
+function mtypeDisplay(mtype) {
+  if (mtype === "area") return "Area";
+  if (mtype === "point") return "Point";
+  return "Linear"; // line, beam, joist
+}
+const esc = (s) => (s || "").replace(/"/g, "&quot;");
+
+// Build the inner props-form HTML for a measure. `pfx` namespaces ids.
+function propsFormHtml(m, pfx) {
+  const isLinear = isLineGeom(m.mtype);
+  const libNames = kmLibraryNames();
+  const hasCurrent = libNames.some(n => n === m.name);
+  const nameOpts = (hasCurrent ? libNames : [m.name, ...libNames])
+    .map(n => `<option value="${esc(n)}" ${n === m.name ? "selected" : ""}>${n}</option>`).join("");
+  const lt = m.linearType || "basic";
+  const mult = (m.multiplier != null && m.multiplier > 0) ? m.multiplier : 1;
+  const sectionOpts = state.sections.map(s =>
+    `<option value="${s.id}" ${s.id === m.sectionId ? "selected" : ""}>${s.name}</option>`).join("");
+  const useOpts = `<option value="" ${!m.use ? "selected" : ""}>Select Use</option>` +
+    USE_OPTIONS.map(u => `<option value="${esc(u)}" ${u === m.use ? "selected" : ""}>${u}</option>`).join("");
+
+  return `
+    <div class="props-form">
+      <label class="pf-label" for="${pfx}-name">Name</label>
+      <div class="pf-field">
+        <select id="${pfx}-name" class="pf-input">${nameOpts}</select>
+      </div>
+
+      <label class="pf-label">Measurement Type</label>
+      <div class="pf-field">
+        <div class="props-readonly" id="${pfx}-mtype">${mtypeDisplay(m.mtype)}</div>
+      </div>
+
+      ${isLinear ? `
+      <div class="pf-spanlabel">Linear Type</div>
+      <div class="pf-field pf-radios">
+        <label class="pf-radio"><input type="radio" name="${pfx}-lt" value="basic" ${lt !== "pitch" ? "checked" : ""}> Basic Linear</label>
+        <label class="pf-radio"><input type="radio" name="${pfx}-lt" value="pitch" ${lt === "pitch" ? "checked" : ""}> Pitch</label>
+      </div>` : ``}
+
+      <label class="pf-label" for="${pfx}-mult">Multiplier</label>
+      <div class="pf-field">
+        <input type="number" id="${pfx}-mult" class="pf-input" min="0.01" step="0.01" value="${mult}">
+      </div>
+
+      <label class="pf-label" for="${pfx}-section">Section</label>
+      <div class="pf-field">
+        <select id="${pfx}-section" class="pf-input">${sectionOpts}</select>
+      </div>
+
+      <label class="pf-label" for="${pfx}-use">Use (Optional)</label>
+      <div class="pf-field">
+        <select id="${pfx}-use" class="pf-input">${useOpts}</select>
+      </div>
+
+      <label class="pf-label">Color</label>
+      <div class="pf-field">
+        <div class="props-color">
+          <button type="button" class="color-trigger" id="${pfx}-color-btn">
+            <span class="color-trigger-sw" id="${pfx}-color-sw" style="background:${m.color}"></span>
+            <i class="fa-solid fa-caret-down"></i>
+          </button>
+          <div class="color-pop" id="${pfx}-color-pop" hidden>
+            ${COLOR_SWATCHES.map(c => `<span class="color-pick ${c.toLowerCase() === (m.color||"").toLowerCase() ? "selected" : ""}" data-color="${c}" style="background:${c}"></span>`).join("")}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Wire a props-form (color picker, name→color sync). Returns collect() => values.
+function wirePropsForm(root, m, pfx) {
+  let color = m.color;
+  const swatch = root.querySelector(`#${pfx}-color-sw`);
+  const btn = root.querySelector(`#${pfx}-color-btn`);
+  const pop = root.querySelector(`#${pfx}-color-pop`);
+  const nameSel = root.querySelector(`#${pfx}-name`);
+
+  const setColor = (c) => {
+    color = c;
+    swatch.style.background = c;
+    pop.querySelectorAll(".color-pick").forEach(s =>
+      s.classList.toggle("selected", s.dataset.color.toLowerCase() === c.toLowerCase()));
+  };
+  btn.addEventListener("click", (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; });
+  pop.querySelectorAll(".color-pick").forEach(sw => sw.addEventListener("click", (e) => {
+    e.stopPropagation(); setColor(sw.dataset.color); pop.hidden = true;
+  }));
+  // selecting a library Name prefills the color with that KM's default
+  if (nameSel) nameSel.addEventListener("change", () => {
+    const c = kmColorFor(nameSel.value);
+    if (c) setColor(c);
+  });
+
+  return function collect() {
+    const ltEl = root.querySelector(`input[name="${pfx}-lt"]:checked`);
+    const multEl = root.querySelector(`#${pfx}-mult`);
+    let mult = parseFloat(multEl ? multEl.value : "1");
+    if (isNaN(mult) || mult <= 0) mult = 1;
+    return {
+      name: nameSel ? nameSel.value : m.name,
+      linearType: ltEl ? ltEl.value : (m.linearType || "basic"),
+      multiplier: mult,
+      sectionId: (root.querySelector(`#${pfx}-section`) || {}).value || m.sectionId,
+      use: (root.querySelector(`#${pfx}-use`) || {}).value || "",
+      color
+    };
+  };
+}
+
+// ====================================================================
+//  EDIT PROPERTIES MODAL  (matches "Measurement Properties" design)
 // ====================================================================
 function openEditModal(id) {
   const m = getMeasure(id);
   if (!m) return;
-  closeContextMenu();
+  closeContextMenu(); closeRowMenu();
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
-  const computed = m.mtype !== "point";
   overlay.innerHTML = `
-    <div class="modal-box">
-      <h4>Edit Measurement</h4>
-      <div class="modal-sub">${MTYPE_META[m.mtype].label} &middot; ${measureLabel(m)}</div>
-
-      <label>Name</label>
-      <input type="text" id="edit-name" value="${(m.name || "").replace(/"/g, "&quot;")}" autofocus>
-
-      <div class="modal-row">
-        <div>
-          <label>Type</label>
-          <select id="edit-type">
-            <option value="line"  ${m.mtype === "line"  ? "selected" : ""}>Line (Linear)</option>
-            <option value="area"  ${m.mtype === "area"  ? "selected" : ""}>Area (Polygon)</option>
-            <option value="point" ${m.mtype === "point" ? "selected" : ""}>Point (Count)</option>
-          </select>
-        </div>
-        <div>
-          <label>${computed ? "Value (auto)" : "Count"}</label>
-          <input type="${computed ? "text" : "number"}" id="edit-value"
-                 value="${computed ? measureLabel(m) : (m.geom.count || 1)}"
-                 ${computed ? "disabled" : 'min="1" step="1"'}>
-        </div>
+    <div class="modal-box props-modal">
+      <div class="modal-titlebar">
+        <h4>Measurement Properties</h4>
+        <button class="modal-x" aria-label="Close">&times;</button>
       </div>
-      ${computed ? `<div style="font-size:10.5px;color:#9aa7b3;margin-top:5px;">Auto-calculated from the drawing — drag the handles on the canvas to resize.</div>` : ""}
-
-      <label>Color</label>
-      <div class="color-picks" id="edit-colors">
-        ${COLOR_SWATCHES.map(c => `<span class="color-pick ${c.toLowerCase() === m.color.toLowerCase() ? "selected" : ""}" data-color="${c}" style="background:${c}"></span>`).join("")}
-      </div>
-
+      ${propsFormHtml(m, "edit")}
       <div class="modal-btns">
         <button class="cancel">Cancel</button>
-        <button class="primary">Save</button>
+        <button class="primary">Apply</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
 
-  let color = m.color;
-  const nameInput = overlay.querySelector("#edit-name");
-  nameInput.focus(); nameInput.select();
-  overlay.querySelectorAll(".color-pick").forEach(sw => sw.addEventListener("click", () => {
-    overlay.querySelectorAll(".color-pick").forEach(s => s.classList.remove("selected"));
-    sw.classList.add("selected"); color = sw.dataset.color;
-  }));
+  const collect = wirePropsForm(overlay, m, "edit");
+  const close = () => { document.removeEventListener("click", onDocClick, true); overlay.remove(); };
+  // close any open color pop on outside click
+  const onDocClick = (e) => {
+    const pop = overlay.querySelector("#edit-color-pop");
+    if (pop && !pop.hidden && !e.target.closest(".props-color")) pop.hidden = true;
+  };
+  document.addEventListener("click", onDocClick, true);
 
-  const close = () => overlay.remove();
-  const save = () => {
-    const name = overlay.querySelector("#edit-name").value.trim();
-    if (!name) { nameInput.style.borderColor = "#ba2121"; nameInput.focus(); return; }
-    const newType = overlay.querySelector("#edit-type").value;
-    if (newType !== m.mtype) { m.geom = convertGeom(m, newType); m.mtype = newType; }
-    if (m.mtype === "point") {
-      const v = parseInt(overlay.querySelector("#edit-value").value, 10);
-      m.geom.count = (isNaN(v) || v < 1) ? 1 : v;
-    }
-    m.name = name; m.color = color;
+  const apply = () => {
+    const v = collect();
+    if (!v.name) return;
+    m.name = v.name;
+    m.linearType = v.linearType;
+    m.multiplier = v.multiplier;
+    m.sectionId = v.sectionId;
+    m.use = v.use || undefined;
+    m.color = v.color;
     close(); renderAll();
-    showToast(`Updated "${name}"`, "success", "fa-solid fa-pen");
+    showToast(`Updated "${v.name}"`, "success", "fa-solid fa-pen");
   };
   overlay.querySelector(".cancel").addEventListener("click", close);
-  overlay.querySelector(".primary").addEventListener("click", save);
+  overlay.querySelector(".modal-x").addEventListener("click", close);
+  overlay.querySelector(".primary").addEventListener("click", apply);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   overlay.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") save();
     if (e.key === "Escape") close();
+    if (e.key === "Enter" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SELECT") apply();
   });
 }
 
@@ -1129,37 +1282,33 @@ function combineSameKM() {
   const ms = [...state.selectedIds].map(getMeasure).filter(m => m && !m.removed);
   if (ms.length < 2) { showToast("Select 2 or more measurements to combine", "error", "fa-solid fa-triangle-exclamation"); return; }
 
-  // 1) KM names must match
-  const names = ms.map(m => normName(m.name));
-  if (new Set(names).size > 1) { showCantCombineModal(ms); return; }
+  // measurements with different units (e.g. Linear vs Area) can't be summed together
+  const units = new Set(ms.map(m => MTYPE_META[m.mtype].unit));
+  if (units.size > 1) { showCantCombineModal(ms); return; }
 
-  // 2) names match → check whether other attributes differ
-  const attrsDiffer =
-    new Set(ms.map(m => (m.color || "").toLowerCase())).size > 1 ||
-    new Set(ms.map(m => m.sectionId)).size > 1 ||
-    new Set(ms.map(m => m.linearType || "basic")).size > 1 ||
-    new Set(ms.map(m => normName(m.use))).size > 1;
-
-  if (attrsDiffer) { showConflictModal(ms); return; }
-
-  // 3) clean match → combine straight away using the first measure's attributes
-  const f = ms[0];
-  performCombine(ms, { color: f.color, sectionId: f.sectionId, linearType: f.linearType || "basic", use: f.use || "" });
+  // open the Combine Measurements modal (same design as Edit Properties),
+  // prefilled from the first selected measurement, to review & confirm.
+  showConflictModal(ms);
 }
 
 // Merge `ms` into the first selected measure; soft-delete the rest; log an audit entry.
 function performCombine(ms, attrs) {
   const kept = ms[0];
   const others = ms.slice(1);
+  // sum each item's EFFECTIVE quantity (its own multiplier already applied).
+  // This becomes the combined base; the modal's multiplier (default 1) applies on top.
   const totalQty = ms.reduce((sum, m) => sum + measureQty(m), 0);
   const removedDetail = others.map(m => `${m.name} (${measureQty(m).toFixed(1)} ${MTYPE_META[m.mtype].unit})`);
 
+  // store the summed quantity; the chosen multiplier (default 1) is applied by measureQty()
   kept.qtyOverride = (attrs && attrs.qtyOverride != null) ? attrs.qtyOverride : totalQty;
   if (attrs) {
+    if (attrs.name) kept.name = attrs.name;
     if (attrs.color) kept.color = attrs.color;
     if (attrs.sectionId) kept.sectionId = attrs.sectionId;
     if (attrs.linearType) kept.linearType = attrs.linearType;
-    if (attrs.use != null) kept.use = attrs.use;
+    if (attrs.use != null) kept.use = attrs.use || undefined;
+    kept.multiplier = (attrs.multiplier != null && attrs.multiplier > 0) ? attrs.multiplier : 1;
   }
   others.forEach(m => { m.removed = true; });
 
@@ -1189,8 +1338,8 @@ function showCantCombineModal(ms) {
   const list = ms.map(m => `<div class="combine-row"><span class="combine-name">${m.name}</span><span class="audit-badge">${MTYPE_META[m.mtype].label}</span></div>`).join("");
   const overlay = buildModal(`
     <h4><i class="fa-solid fa-triangle-exclamation" style="color:#e0a800;"></i> Can't Combine</h4>
-    <div class="modal-sub">The selected measurements belong to different Key Measures.</div>
-    <p class="modal-note">Combining is only allowed when every selected item shares the same KM name. Rename them to match first, or select items of the same KM.</p>
+    <div class="modal-sub">The selected measurements use different measurement units.</div>
+    <p class="modal-note">Combining sums quantities, so every selected item must share the same unit (e.g. all Linear LF, or all Area SF). Select items of the same measurement type and try again.</p>
     <div class="combine-list">${list}</div>
     <div class="modal-btns"><button class="primary">OK</button></div>
   `);
@@ -1201,84 +1350,68 @@ function showCantCombineModal(ms) {
   overlay.querySelector(".primary").focus();
 }
 
-// Conflict-resolution modal (names match, other attributes differ)
+// Conflict-resolution / combine modal — uses the same Measurement Properties design,
+// prefilled from the first selected measurement, plus a summary of what's being merged.
 function showConflictModal(ms) {
   const f = ms[0];
-  const sumQty = ms.reduce((s, m) => s + measureQty(m), 0);
   const unit = MTYPE_META[f.mtype].unit;
+  const sumQty = ms.reduce((s, m) => s + measureQty(m), 0);
   const sumDisplay = unit === "EA" ? String(Math.round(sumQty)) : sumQty.toFixed(1);
 
-  const sectionOpts = state.sections.map(s =>
-    `<option value="${s.id}" ${s.id === f.sectionId ? "selected" : ""}>${s.name}</option>`).join("");
   const listRows = ms.map(m => `
     <div class="combine-row">
       <span class="combine-name">${m.name}</span>
       <span class="audit-badge">${unit === "EA" ? Math.round(measureQty(m)) : measureQty(m).toFixed(1)} ${unit}</span>
     </div>`).join("");
 
-  const overlay = buildModal(`
-    <h4><i class="fa-solid fa-object-group" style="color:#1a47ba;"></i> Resolve & Combine ${ms.length} Measurements</h4>
-    <div class="modal-sub">"${f.name}" — same KM name, but some attributes differ. Choose the values to keep.</div>
-    <div class="combine-list">${listRows}</div>
+  // Prefill from the first measure, but reset the multiplier to 1 — the summed total
+  // already incorporates each item's own multiplier, so a fresh ×1 avoids double-counting.
+  const cfBase = { ...f, multiplier: 1 };
 
-    <div class="modal-row">
-      <div>
-        <label>Linear Type</label>
-        <select id="cf-lineartype">
-          <option value="basic" ${(f.linearType||"basic")==="basic"?"selected":""}>Basic</option>
-          <option value="linearPitch" ${f.linearType==="linearPitch"?"selected":""}>Linear Pitch</option>
-        </select>
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box props-modal">
+      <div class="modal-titlebar">
+        <h4>Combine Measurements</h4>
+        <button class="modal-x" aria-label="Close">&times;</button>
       </div>
-      <div>
-        <label>Section</label>
-        <select id="cf-section">${sectionOpts}</select>
+      <div class="modal-sub">Combining ${ms.length} measurements into one. Review the properties to keep — quantities are summed automatically (${sumDisplay} ${unit}).</div>
+      <div class="combine-list">${listRows}</div>
+      ${propsFormHtml(cfBase, "cf")}
+      <label class="conflict-confirm"><input type="checkbox" id="cf-confirm"> I confirm combining these ${ms.length} items (total ${sumDisplay} ${unit})</label>
+      <div class="modal-btns">
+        <button class="cancel">Cancel</button>
+        <button class="primary" disabled>Combine</button>
       </div>
-    </div>
+    </div>`;
+  document.body.appendChild(overlay);
 
-    <div class="modal-row">
-      <div>
-        <label>Combined Quantity (${unit})</label>
-        <input type="number" id="cf-multiplier" value="${sumDisplay}" step="${unit==="EA"?"1":"0.1"}">
-      </div>
-      <div>
-        <label>Use <span style="color:#9aa7b3;font-weight:400;">(optional)</span></label>
-        <input type="text" id="cf-use" value="${(f.use||"").replace(/"/g,"&quot;")}" placeholder="e.g. Center carry beam">
-      </div>
-    </div>
-
-    <label class="conflict-confirm"><input type="checkbox" id="cf-confirm"> I confirm the combined quantity above (${sumDisplay} ${unit}, summed from ${ms.length} items)</label>
-
-    <label>Color</label>
-    <div class="color-picks" id="cf-colors">
-      ${COLOR_SWATCHES.map(c => `<span class="color-pick ${c.toLowerCase()===f.color.toLowerCase()?"selected":""}" data-color="${c}" style="background:${c}"></span>`).join("")}
-    </div>
-
-    <div class="modal-btns">
-      <button class="cancel">Cancel</button>
-      <button class="primary" disabled>Combine</button>
-    </div>
-  `);
-
-  let color = f.color;
+  const collect = wirePropsForm(overlay, cfBase, "cf");
   const confirmBox = overlay.querySelector("#cf-confirm");
   const primaryBtn = overlay.querySelector(".primary");
   confirmBox.addEventListener("change", () => { primaryBtn.disabled = !confirmBox.checked; });
-  overlay.querySelectorAll(".color-pick").forEach(sw => sw.addEventListener("click", () => {
-    overlay.querySelectorAll(".color-pick").forEach(s => s.classList.remove("selected"));
-    sw.classList.add("selected"); color = sw.dataset.color;
-  }));
-  const close = () => overlay.remove();
+
+  const onDocClick = (e) => {
+    const pop = overlay.querySelector("#cf-color-pop");
+    if (pop && !pop.hidden && !e.target.closest(".props-color")) pop.hidden = true;
+  };
+  document.addEventListener("click", onDocClick, true);
+  const close = () => { document.removeEventListener("click", onDocClick, true); overlay.remove(); };
+
   overlay.querySelector(".cancel").addEventListener("click", close);
+  overlay.querySelector(".modal-x").addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   primaryBtn.addEventListener("click", () => {
     if (!confirmBox.checked) return;
-    const qv = parseFloat(overlay.querySelector("#cf-multiplier").value);
+    const v = collect();
     performCombine(ms, {
-      color,
-      sectionId: overlay.querySelector("#cf-section").value,
-      linearType: overlay.querySelector("#cf-lineartype").value,
-      use: overlay.querySelector("#cf-use").value.trim(),
-      qtyOverride: isNaN(qv) ? sumQty : qv
+      name: v.name,
+      color: v.color,
+      sectionId: v.sectionId,
+      linearType: v.linearType,
+      use: v.use,
+      multiplier: v.multiplier
     });
     close();
   });
@@ -1305,17 +1438,14 @@ function showToast(msg, type = "", icon = "") {
 // ====================================================================
 function setTool(tool) {
   state.tool = tool;
-  document.querySelectorAll(".ctool[data-tool]").forEach(b => b.classList.toggle("active", b.dataset.tool === tool));
   const svg = document.getElementById("draw-svg");
-  svg.style.cursor = tool === "pan" ? "grab"
-    : tool === "move" ? "move"
-    : (tool === "select" ? (state.pasteMode ? "copy" : "default") : "crosshair");
+  if (svg) svg.style.cursor = state.pasteMode ? "copy" : "default";
   updateModeIndicator();
   updateStatusBar();
-  renderCanvas();          // re-render so selection handles show/hide with the mode
+  renderCanvas();          // re-render so selection handles reflect paste mode
 }
 
-// Toggle the canvas mode outline + floating badge (Move / Paste / Select).
+// Toggle the canvas mode outline + floating badge (Paste mode only now).
 function updateModeIndicator() {
   const wrap = document.getElementById("canvas-sheet-wrap");
   const badge = document.getElementById("mode-badge");
@@ -1327,36 +1457,23 @@ function updateModeIndicator() {
     wrap.classList.add("mode-paste");
     badge.classList.add("show", "paste");
     if (txt) txt.textContent = "PASTE MODE — click to place · Esc to finish";
-  } else if (state.tool === "move") {
-    wrap.classList.add("mode-move");
-    badge.classList.add("show", "move");
-    if (txt) txt.textContent = "MOVE MODE — drag to reposition · Esc to finish";
   }
 }
 
-// Update the bottom status bar (active tool + contextual hint).
+// Update the bottom status bar (snap indicator + contextual hint).
 function updateStatusBar() {
-  const toolEl = document.getElementById("status-tool");
   const hintEl = document.getElementById("status-hint");
   const snapEl = document.getElementById("status-snap");
   if (snapEl) snapEl.textContent = state.snap ? "Snap: On" : "Snap: Off";
-  let label = "Select", hint = "Click to select · Ctrl/Shift-click to multi-select · Ctrl-drag to box-select";
+  let hint = "Click to select · drag to move · Ctrl/Shift-click to multi-select · Ctrl-drag to box-select";
   if (state.pasteMode) {
-    label = "Paste"; hint = "Click on the canvas to drop a copy · Esc to finish";
-  } else if (state.tool === "move") {
-    label = "Move"; hint = "Drag a measurement to reposition · snaps to endpoints & grid · Esc to finish";
-  } else if (state.tool === "pan") {
-    label = "Pan"; hint = "Drag to pan the sheet · scroll to zoom";
+    hint = "Click on the canvas to drop a copy · Esc to finish";
   }
-  if (toolEl) toolEl.textContent = label;
   if (hintEl) hintEl.textContent = hint;
 }
 
-// Enable the Combine button only when 2+ measurements are selected.
-function updateToolbarState() {
-  const btn = document.getElementById("btn-combine");
-  if (btn) btn.disabled = state.selectedIds.size < 2;
-}
+// No-op kept for callers — the Combine toolbar button has been removed.
+function updateToolbarState() {}
 function resetView() { state.view = { x: 0, y: 0, w: VIEW_W, h: VIEW_H }; }
 function zoomBy(factor, cx, cy) {
   const v = state.view;
@@ -1379,34 +1496,28 @@ let spaceDown = false;
 document.addEventListener("keydown", (e) => {
   const tag = (e.target.tagName || "").toLowerCase();
   if (tag === "input" || tag === "select" || tag === "textarea") { if (e.key === "Escape") e.target.blur(); return; }
-  if (e.code === "Space") { spaceDown = true; const s = document.getElementById("draw-svg"); if (s && state.tool !== "pan") s.style.cursor = "grab"; }
+  if (e.code === "Space") { spaceDown = true; const s = document.getElementById("draw-svg"); if (s) s.style.cursor = "grab"; }
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && (e.key === "c" || e.key === "C")) { e.preventDefault(); copySelection(); }
   else if (ctrl && e.shiftKey && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("original"); }
   else if (ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("cursor", state.lastCanvasCursor); }
   else if (ctrl && (e.key === "a" || e.key === "A")) { e.preventDefault(); selectAll(); }
-  else if (!ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); setTool("select"); }
-  else if (!ctrl && (e.key === "m" || e.key === "M")) { e.preventDefault(); setTool("move"); }
-  else if (!ctrl && (e.key === "h" || e.key === "H")) { e.preventDefault(); setTool("pan"); }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
   else if (e.key === "Escape") {
-    closeContextMenu();
+    closeContextMenu(); closeRowMenu();
     if (state.pendingPaste) {            // a collision decision is pending → cancel it
       finalizePaste("cancel");
     } else if (state.pasteMode || state.clipboard.length) {
       clearClipboard();         // clear clipboard, remove ghost, exit paste mode
       clearSelection();         // also drop any selection
       showToast("Clipboard cleared — paste mode off", "", "fa-solid fa-ban");
-    } else if (state.tool !== "select") {
-      setTool("select");        // commit & exit Move / Pan mode back to Select
-      showToast("Back to Select mode", "", "fa-solid fa-arrow-pointer");
     } else {
       clearSelection();
     }
   }
 });
 document.addEventListener("keyup", (e) => {
-  if (e.code === "Space") { spaceDown = false; const s = document.getElementById("draw-svg"); if (s) s.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "select" ? (state.pasteMode ? "copy" : "default") : "crosshair"); }
+  if (e.code === "Space") { spaceDown = false; const s = document.getElementById("draw-svg"); if (s) s.style.cursor = state.pasteMode ? "copy" : "default"; }
 });
 
 // Context-menu actions
@@ -1414,11 +1525,15 @@ document.getElementById("ctx-copy").addEventListener("click", function () { if (
 document.getElementById("ctx-paste-cursor").addEventListener("click", function () { if (!this.classList.contains("disabled")) { const pt = state.ctxPastePoint; closeContextMenu(); pasteClipboard("cursor", pt); } });
 document.getElementById("ctx-paste").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); pasteClipboard("original"); } });
 document.getElementById("ctx-edit").addEventListener("click", function () { if (!this.classList.contains("disabled")) { const id = [...state.selectedIds][0]; closeContextMenu(); openEditModal(id); } });
+document.getElementById("ctx-combine").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); combineSameKM(); } });
 document.getElementById("ctx-delete").addEventListener("click", function () { if (!this.classList.contains("disabled")) { closeContextMenu(); deleteSelection(); } });
 
-// close context menu on outside click
-document.addEventListener("click", (e) => { if (!e.target.closest("#context-menu")) closeContextMenu(); });
-window.addEventListener("resize", closeContextMenu);
+// close context menu / row menu on outside click
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#context-menu")) closeContextMenu();
+  if (!e.target.closest("#row-menu") && !e.target.closest(".row-ellipsis")) closeRowMenu();
+});
+window.addEventListener("resize", () => { closeContextMenu(); closeRowMenu(); });
 
 // Search
 document.getElementById("sheet-search").addEventListener("input", (e) => { state.sheetSearch = e.target.value; renderSheets(); });
@@ -1439,10 +1554,6 @@ document.getElementById("tab-sections").addEventListener("click", () => {
   document.getElementById("takeoff-tree").innerHTML = '<div style="padding:24px;color:#9aa7b3;text-align:center;font-size:12px;">Sections view — not part of this prototype.<br>Switch back to <b>Takeoff</b>.</div>';
 });
 
-// Canvas toolbar tools
-document.querySelectorAll(".ctool[data-tool]").forEach(btn => btn.addEventListener("click", () => setTool(btn.dataset.tool)));
-// Combine Same KM
-document.getElementById("btn-combine").addEventListener("click", function () { if (!this.disabled) combineSameKM(); });
 // Collision popover buttons
 document.getElementById("collide-merge").addEventListener("click", () => finalizePaste("merge"));
 document.getElementById("collide-separate").addEventListener("click", () => finalizePaste("separate"));
