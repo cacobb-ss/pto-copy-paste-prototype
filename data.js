@@ -30,6 +30,8 @@ const SECTIONS = [
   { id: "sec-doors",     name: "DOORS",           expanded: true },
   { id: "sec-windows",   name: "WINDOWS",         expanded: true },
   { id: "sec-rooms",     name: "ROOMS / SLAB",    expanded: true },
+  { id: "sec-beams",     name: "BEAMS / HEADERS", expanded: true },
+  { id: "sec-joists",    name: "JOISTS / RAFTERS",expanded: true },
   { id: "sec-roofing",   name: "ROOFING",         expanded: true },
   { id: "sec-siding",    name: "SIDING",          expanded: true }
 ];
@@ -42,9 +44,11 @@ const COLOR_SWATCHES = [
 
 // type → metadata
 const MTYPE_META = {
-  line:  { icon: "fa-solid fa-ruler",          label: "Linear", unit: "LF" },
-  area:  { icon: "fa-solid fa-draw-polygon",   label: "Area",   unit: "SF" },
-  point: { icon: "fa-solid fa-location-crosshairs", label: "Count", unit: "EA" }
+  line:  { icon: "fa-solid fa-ruler",          label: "Linear",      unit: "LF" },
+  area:  { icon: "fa-solid fa-draw-polygon",   label: "Area",        unit: "SF" },
+  point: { icon: "fa-solid fa-location-crosshairs", label: "Count",  unit: "EA" },
+  beam:  { icon: "fa-solid fa-grip-lines",     label: "Beam/Header", unit: "LF" },
+  joist: { icon: "fa-solid fa-align-justify",  label: "Joist/Rafter",unit: "LF" }
 };
 
 /* --------------------------------------------------------------------
@@ -83,6 +87,12 @@ const MEASUREMENTS = [
   // Windows (points)
   { id: "m-211", sheetId: "sheet-1-2", sectionId: "sec-windows", name: "DH Window 30x48", mtype: "point", color: "#d63031", geom: { x: 700, y: 200, count: 1 } },
   { id: "m-212", sheetId: "sheet-1-2", sectionId: "sec-windows", name: "DH Window 30x48", mtype: "point", color: "#d63031", geom: { x: 860, y: 320, count: 1 } },
+  // Beams / Headers (linear w/ size + ply metadata)
+  { id: "m-213", sheetId: "sheet-1-2", sectionId: "sec-beams", name: "Beam 2x10 (3-ply)", mtype: "beam", color: "#6c5ce7", geom: { x1: 240, y1: 410, x2: 540, y2: 410, size: "2x10", ply: 3 }, linearType: "basic", use: "Center carry beam" },
+  { id: "m-214", sheetId: "sheet-1-2", sectionId: "sec-beams", name: "Header 2x8 (2-ply)", mtype: "beam", color: "#5f3dc4", geom: { x1: 368, y1: 200, x2: 408, y2: 200, size: "2x8", ply: 2 }, linearType: "basic", use: "Door header" },
+  // Joists / Rafters (linear span w/ spacing metadata)
+  { id: "m-215", sheetId: "sheet-1-2", sectionId: "sec-joists", name: "Floor Joist 2x10", mtype: "joist", color: "#0984e3", geom: { x1: 260, y1: 240, x2: 260, y2: 560, spacing: 16, size: "2x10" }, linearType: "basic", use: "First floor framing" },
+  { id: "m-216", sheetId: "sheet-1-2", sectionId: "sec-joists", name: "Floor Joist 2x10", mtype: "joist", color: "#0984e3", geom: { x1: 320, y1: 240, x2: 320, y2: 560, spacing: 16, size: "2x10" }, linearType: "basic", use: "First floor framing" },
 
   /* ===== Sheet 1.3 — Rear Elevation ===== */
   // Siding area
@@ -133,6 +143,15 @@ const KEY_MEASURE_LIBRARY = [
   { id: "lib-rooms", name: "ROOMS / SLAB", expanded: true, types: [
     { name: "Room Floor Area", mtype: "area", color: "#21ba45" },
     { name: "Garage Slab",     mtype: "area", color: "#F9E79F" }
+  ]},
+  { id: "lib-beams", name: "BEAMS / HEADERS", expanded: false, types: [
+    { name: "Beam 2x10 (3-ply)", mtype: "beam", color: "#6c5ce7" },
+    { name: "Header 2x8 (2-ply)", mtype: "beam", color: "#5f3dc4" },
+    { name: "LVL 1.75x11.875",   mtype: "beam", color: "#7048e8" }
+  ]},
+  { id: "lib-joists", name: "JOISTS / RAFTERS", expanded: false, types: [
+    { name: "Floor Joist 2x10", mtype: "joist", color: "#0984e3" },
+    { name: "Roof Rafter 2x8",  mtype: "joist", color: "#1971c2" }
   ]},
   { id: "lib-roofing", name: "ROOFING", expanded: false, types: [
     { name: "Roof Slope", mtype: "area", color: "#d63031" },

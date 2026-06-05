@@ -57,9 +57,25 @@
     <!-- ============ CENTER — CANVAS ============ -->
     <main class="canvas-area">
       <div class="canvas-toolbar">
-        <span class="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click to select &middot; drag to move &middot; Ctrl+C copy, then click on canvas to paste &middot; Esc clears clipboard</span>
+        <div class="tool-group">
+          <button class="ctool active" id="tool-select" data-tool="select" title="Select tool (V) — click to select, Ctrl/Shift+click to multi-select, drag empty space to box-select">
+            <i class="fa-regular fa-hand-pointer"></i> Select
+          </button>
+          <button class="ctool" id="tool-move" data-tool="move" title="Move tool (M) — drag measurements to reposition them">
+            <i class="fa-solid fa-up-down-left-right"></i> Move
+          </button>
+          <button class="ctool" id="tool-pan" data-tool="pan" title="Pan tool (H) — drag to pan the sheet">
+            <i class="fa-solid fa-hand"></i> Pan
+          </button>
+        </div>
+        <span class="tool-sep"></span>
+        <button class="ctool combine-btn" id="btn-combine" data-tool="" title="Combine selected measurements that share the same Key Measure name" disabled>
+          <i class="fa-solid fa-object-group"></i> Combine Same KM
+        </button>
 
         <span class="spacer"></span>
+
+        <span class="canvas-hint" id="canvas-hint"><i class="fa-regular fa-hand-pointer"></i> Click to select &middot; Ctrl-drag to box-select &middot; Ctrl+C copy then click to paste</span>
 
         <div class="zoom-group">
           <button class="zoom-btn" id="zoom-out" title="Zoom out"><i class="fa-solid fa-minus"></i></button>
@@ -69,19 +85,23 @@
         </div>
       </div>
 
-      <div class="canvas-stage">
-        <div class="canvas-sheet-wrap">
-          <svg id="draw-svg" xmlns="https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Bitmap_VS_SVG.svg/1280px-Bitmap_VS_SVG.svg.png" preserveAspectRatio="xMidYMid meet"></svg>
+      <div class="canvas-stage" id="canvas-stage">
+        <div class="canvas-sheet-wrap" id="canvas-sheet-wrap">
+          <svg id="draw-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
           <div class="sheet-tag" id="sheet-tag"></div>
+          <!-- Mode indicator badge (shown in Move / Paste mode) -->
+          <div class="mode-badge" id="mode-badge"><i class="fa-solid fa-up-down-left-right"></i> <span id="mode-badge-text">Move mode</span></div>
+          <!-- Floating coordinate / distance readout (shown while dragging or placing) -->
+          <div class="coord-readout" id="coord-readout"></div>
         </div>
       </div>
 
       <div class="status-bar">
-        <span class="status-item">Tool: <b>Select</b></span>
+        <span class="status-item">Tool: <b id="status-tool">Select</b></span>
         <span class="status-item">Scale: <b>1" = 6 px/ft</b></span>
-        <span class="status-item">Snapping <span class="on">ON</span></span>
+        <span class="status-item">Snapping <span class="on" id="status-snap">ON</span></span>
         <span class="status-spacer"></span>
-        <span class="status-item">Click to select · Ctrl+Click multi-select · Drag to move · Ctrl+C / Ctrl+V to copy &amp; paste</span>
+        <span class="status-item" id="status-hint">Click to select · Ctrl+Click multi-select · Ctrl-drag box-select · Ctrl+C / Ctrl+V copy &amp; paste</span>
       </div>
     </main>
 
@@ -133,13 +153,24 @@
     </div>
   </div>
 
+  <!-- ===================== COLLISION POPOVER ===================== -->
+  <div class="collide-popover" id="collide-popover">
+    <div class="collide-head"><i class="fa-solid fa-layer-group"></i> <span id="collide-title">A measurement already exists here</span></div>
+    <div class="collide-sub" id="collide-sub">Choose how to handle the overlapping paste.</div>
+    <div class="collide-btns">
+      <button class="collide-merge" id="collide-merge"><i class="fa-solid fa-code-merge"></i> Merge Quantities</button>
+      <button class="collide-separate primary" id="collide-separate"><i class="fa-solid fa-clone"></i> Place Separately</button>
+      <button class="collide-cancel" id="collide-cancel">Cancel</button>
+    </div>
+  </div>
+
   <!-- ===================== TOASTS ===================== -->
   <div class="toast-container" id="toast-container"></div>
 
   <!-- ===================== HELP PILL ===================== -->
   <div class="help-pill" title="Keyboard shortcuts">
     <i class="fa-regular fa-keyboard"></i>
-    <span>Ctrl+C Copy &middot; click canvas to paste &middot; Ctrl+V Paste at Cursor &middot; Ctrl+Shift+V Paste at Original &middot; Ctrl+A All &middot; Del Delete &middot; Esc Clear clipboard</span>
+    <span>V Select &middot; M Move &middot; Ctrl+C Copy then click to paste &middot; Ctrl+V at Cursor &middot; Ctrl+Shift+V at Original &middot; Ctrl-drag Box-select &middot; Esc Finalize/Exit</span>
   </div>
 
   <!-- ===================== SCRIPTS ===================== -->

@@ -94,6 +94,15 @@ html, body {
 .ctool.active { background: #e7eef6; border-color: #9bb4cc; color: var(--color-primary); font-weight: 600; }
 .ctool .dot { width: 9px; height: 9px; border-radius: 2px; }
 .canvas-toolbar .spacer { flex: 1; }
+.tool-group { display: inline-flex; gap: 4px; }
+.tool-sep { width: 1px; height: 22px; background: var(--color-border); margin: 0 4px; display: inline-block; }
+.ctool i { font-size: 12px; }
+.ctool[data-tool="move"].active, .ctool[data-tool="move"]:hover { background: #fff4e6; border-color: #f0a455; color: #b25e09; }
+.ctool[data-tool="move"].active { box-shadow: inset 0 0 0 1px #f0a455; }
+/* Combine Same KM button */
+.combine-btn { background: #eef6ee; border-color: #aacfaa; color: #1b6b2e; font-weight: 600; }
+.combine-btn:hover:not(:disabled) { background: #dff0df; border-color: #7cb87c; }
+.combine-btn:disabled { background: #f4f5f6; border-color: var(--color-border); color: #b6bdc4; cursor: not-allowed; }
 .canvas-hint { font-size: 12px; color: #7f8c99; display: inline-flex; align-items: center; gap: 7px; }
 .canvas-hint i { color: #9bb4cc; }
 .zoom-group { display: flex; align-items: center; gap: 4px; }
@@ -102,11 +111,34 @@ html, body {
 .zoom-label { font-size: 11px; color: #6b7682; min-width: 42px; text-align: center; }
 
 .canvas-stage { flex: 1; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.canvas-sheet-wrap { width: 94%; height: 94%; background: #fff; box-shadow: 0 6px 28px rgba(0,0,0,0.35); border: 1px solid #99a; position: relative; overflow: hidden; }
+.canvas-sheet-wrap { width: 94%; height: 94%; background: #fff; box-shadow: 0 6px 28px rgba(0,0,0,0.35); border: 1px solid #99a; position: relative; overflow: hidden; transition: box-shadow .15s, outline-color .15s; outline: 3px solid transparent; outline-offset: -3px; }
 #draw-svg { width: 100%; height: 100%; display: block; touch-action: none; background: #fff; }
 #draw-svg.mode-select { cursor: default; }
 #draw-svg.panning { cursor: grabbing; }
 .sheet-tag { position: absolute; top: 10px; left: 12px; font-size: 11px; font-weight: 700; color: #9aa3ad; pointer-events: none; }
+
+/* Move / Paste mode visual indicator (border glow on the sheet) */
+.canvas-sheet-wrap.mode-move  { outline-color: #f0a455; box-shadow: 0 6px 28px rgba(0,0,0,0.35), inset 0 0 0 1px #f0a455; }
+.canvas-sheet-wrap.mode-paste { outline-color: var(--color-sel); box-shadow: 0 6px 28px rgba(0,0,0,0.35), inset 0 0 0 1px var(--color-sel); }
+
+/* Mode badge (top-center of canvas) */
+.mode-badge { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: none; align-items: center; gap: 7px; padding: 5px 14px; border-radius: 14px; font-size: 12px; font-weight: 700; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.25); pointer-events: none; z-index: 30; }
+.mode-badge.show { display: inline-flex; }
+.mode-badge.move  { background: #b25e09; }
+.mode-badge.paste { background: var(--color-sel); }
+
+/* Floating coordinate / distance readout */
+.coord-readout { position: absolute; display: none; background: rgba(35,57,79,0.94); color: #fff; font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 5px; pointer-events: none; z-index: 40; white-space: nowrap; font-variant-numeric: tabular-nums; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+.coord-readout.show { display: block; }
+.coord-readout .cr-delta { color: #8addff; }
+
+/* Beam / Header visuals */
+.meas-beam { stroke-width: 7; stroke-linecap: butt; }
+.meas-beam-core { stroke: #fff; stroke-width: 2; stroke-dasharray: 2 4; pointer-events: none; }
+.meas-beam-cap { stroke-width: 7; stroke-linecap: butt; }
+/* Joist / Rafter visuals */
+.meas-joist-run { stroke-width: 3; stroke-linecap: round; }
+.joist-tick { stroke-width: 1.6; opacity: .75; pointer-events: none; }
 
 /* Measurement visuals (SVG classes) */
 .meas { cursor: pointer; }
@@ -143,6 +175,14 @@ html, body {
 .paste-ghost .ghost-point { fill-opacity: .55; stroke: #fff; stroke-width: 2; }
 .paste-ghost .ghost-cross { stroke: var(--color-sel); stroke-width: 1.5; opacity: .9; }
 .paste-ghost .ghost-hint { fill: var(--color-sel); font-size: 12px; font-weight: 600; paint-order: stroke; stroke: rgba(255,255,255,.85); stroke-width: 3px; }
+
+/* Snap indicators (highlight active snap point during move/paste) */
+@keyframes snappulse { 0% { r: 5; opacity: .9; } 100% { r: 9; opacity: .35; } }
+.snap-marker { fill: none; stroke: #f59f00; stroke-width: 2; }
+.snap-marker.pulse { animation: snappulse .7s ease-out infinite alternate; }
+.snap-cross { stroke: #f59f00; stroke-width: 1.5; }
+.snap-marker.grid { stroke: #4c6ef5; }
+.snap-cross.grid { stroke: #4c6ef5; }
 
 .status-bar { height: 30px; background: #fff; border-top: 1px solid var(--color-border); display: flex; align-items: center; gap: 20px; padding: 0 16px; font-size: 11px; color: #666; }
 .status-bar .status-item b { color: var(--color-primary); }
@@ -230,6 +270,35 @@ html, body {
 /* ======= Help pill ======= */
 .help-pill { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(35,57,79,0.94); color: #fff; font-size: 11px; padding: 6px 14px; border-radius: 16px; z-index: 200; box-shadow: 0 2px 8px rgba(0,0,0,0.25); pointer-events: none; white-space: nowrap; max-width: 96vw; overflow: hidden; text-overflow: ellipsis; }
 .help-pill b { color: #8addff; }
+
+/* ======= Collision popover (inline, near paste location) ======= */
+.collide-popover { position: fixed; z-index: 9600; display: none; width: 268px; background: #fff; border: 1px solid #d3a; border-color: #e0c36b; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.28); padding: 13px 15px; }
+.collide-popover.show { display: block; }
+.collide-popover::after { content: ""; position: absolute; bottom: -8px; left: 28px; width: 14px; height: 14px; background: #fff; border-right: 1px solid #e0c36b; border-bottom: 1px solid #e0c36b; transform: rotate(45deg); }
+.collide-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--color-primary); margin-bottom: 4px; }
+.collide-head i { color: #e8a23d; }
+.collide-sub { font-size: 11.5px; color: var(--color-text-muted); margin-bottom: 11px; line-height: 1.4; }
+.collide-btns { display: flex; flex-direction: column; gap: 7px; }
+.collide-btns button { display: inline-flex; align-items: center; gap: 8px; justify-content: center; padding: 8px 12px; border-radius: 5px; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 1px solid #ccc; background: #fff; color: #46505c; transition: all .12s; }
+.collide-btns button:hover { background: #f1f4f7; }
+.collide-btns .primary { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.collide-btns .primary:hover { background: var(--color-primary-hover); }
+.collide-btns .collide-merge { background: #eef6ee; border-color: #aacfaa; color: #1b6b2e; }
+.collide-btns .collide-merge:hover { background: #dff0df; }
+.collide-btns .collide-cancel { color: #973937; }
+
+/* ======= Conflict resolution modal extras ======= */
+.modal-box .modal-note { font-size: 11px; color: var(--color-text-muted); margin-top: 5px; line-height: 1.4; }
+.modal-box .conflict-confirm { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: #46505c; font-weight: 600; }
+.modal-box .conflict-confirm input { width: auto; }
+.combine-list { background: #f6f8fa; border: 1px solid #e6ebf0; border-radius: 5px; padding: 8px 10px; margin-top: 8px; max-height: 110px; overflow-y: auto; font-size: 11.5px; color: #5a6573; }
+.combine-list .cl-row { display: flex; justify-content: space-between; padding: 2px 0; }
+.combine-list .cl-row b { color: var(--color-primary); font-variant-numeric: tabular-nums; }
+.combine-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px dotted #e1e7ec; }
+.combine-row:last-child { border-bottom: none; }
+.combine-name { font-weight: 600; color: #3a4654; }
+.audit-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: #8a96a3; font-variant-numeric: tabular-nums; background: #eef2f6; border-radius: 4px; padding: 1px 7px; }
+.sel-outline-line { fill: none; stroke: var(--color-sel); stroke-width: 3; stroke-opacity: .35; pointer-events: none; }
 
 @media (max-width: 980px) {
   .sheets-panel { width: 56px; min-width: 56px; } .sheets-panel .panel-body { display: none; }

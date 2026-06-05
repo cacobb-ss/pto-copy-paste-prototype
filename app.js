@@ -20,13 +20,23 @@ const state = {
   clipboard: [],                 // deep copies (no id/sheetId) + _sourceSheetId
   sheetSearch: "",
   treeSearch: "",
-  tool: "select",                // select | pan | line | area | point
+  tool: "select",                // select | move | pan | line | area | point
   view: { x: 0, y: 0, w: VIEW_W, h: VIEW_H },
   expandedSheets: new Set(["sheet-1-2"]),
   lastCanvasCursor: { x: VIEW_W / 2, y: VIEW_H / 2 }, // last known cursor in SVG coords
   ctxPastePoint: null,                                 // SVG point to use for "paste at cursor"
-  pasteMode: false                                     // true after copy → click-to-paste active
+  pasteMode: false,                                    // true after copy → click-to-paste active
+  snap: true,                                          // snap-to-grid / endpoints during move & paste
+  pendingPaste: null,                                  // staged paste awaiting a collision decision
+  history: []                                          // audit log (combine / merge entries)
 };
+
+const GRID = 40;                  // grid spacing in user units (matches data.js gridLines)
+const SNAP_ENDPOINT_T = 11;       // px tolerance to snap to an endpoint
+const SNAP_GRID_T = 7;            // px tolerance to snap to grid
+const COLLIDE_T = 18;             // px proximity that counts as "a measurement already here"
+const lineTypes = ["line", "beam", "joist"];   // geometries that use {x1,y1,x2,y2}
+const isLineGeom = (mtype) => lineTypes.includes(mtype);
 
 let idc = 5000;
 const nextId = () => "m-" + (++idc);
@@ -48,13 +58,25 @@ function centroid(pts) {
   const c = pts.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
   return { x: c.x / pts.length, y: c.y / pts.length };
 }
+// raw geometric quantity (numeric) in the measure's native unit
+function geomQty(m) {
+  if (isLineGeom(m.mtype)) return lineFeet(m.geom);
+  if (m.mtype === "area")  return polyFeet2(m.geom.points);
+  return m.geom.count || 1;
+}
+// effective quantity = qtyOverride (set by combine / merge) if present, else geometric
+function measureQty(m) {
+  return (m.qtyOverride != null) ? m.qtyOverride : geomQty(m);
+}
 function measureLabel(m) {
-  if (m.mtype === "line")  return `${lineFeet(m.geom).toFixed(1)} LF`;
-  if (m.mtype === "area")  return `${Math.round(polyFeet2(m.geom.points)).toLocaleString()} SF`;
-  return `${m.geom.count || 1} EA`;
+  const unit = MTYPE_META[m.mtype].unit;
+  const v = measureQty(m);
+  if (unit === "EA") return `${Math.round(v)} EA`;
+  if (unit === "SF") return `${Math.round(v).toLocaleString()} SF`;
+  return `${v.toFixed(1)} LF`;   // LF for line / beam / joist
 }
 function measureBBox(m) {
-  if (m.mtype === "line") {
+  if (isLineGeom(m.mtype)) {
     return { x1: Math.min(m.geom.x1, m.geom.x2), y1: Math.min(m.geom.y1, m.geom.y2),
              x2: Math.max(m.geom.x1, m.geom.x2), y2: Math.max(m.geom.y1, m.geom.y2) };
   }
@@ -65,13 +87,14 @@ function measureBBox(m) {
   return { x1: m.geom.x - 11, y1: m.geom.y - 11, x2: m.geom.x + 11, y2: m.geom.y + 11 };
 }
 function offsetGeom(geom, mtype, dx, dy) {
-  if (mtype === "line")  return { x1: geom.x1 + dx, y1: geom.y1 + dy, x2: geom.x2 + dx, y2: geom.y2 + dy };
-  if (mtype === "area")  return { points: geom.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
-  return { x: geom.x + dx, y: geom.y + dy, count: geom.count };
+  // line / beam / joist all carry x1,y1,x2,y2 (+ extra metadata we preserve via spread)
+  if (isLineGeom(mtype)) return { ...geom, x1: geom.x1 + dx, y1: geom.y1 + dy, x2: geom.x2 + dx, y2: geom.y2 + dy };
+  if (mtype === "area")  return { ...geom, points: geom.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
+  return { ...geom, x: geom.x + dx, y: geom.y + dy, count: geom.count };
 }
 // center point of a geometry (line midpoint / polygon centroid / point itself)
 function geomCenter(geom, mtype) {
-  if (mtype === "line")  return { x: (geom.x1 + geom.x2) / 2, y: (geom.y1 + geom.y2) / 2 };
+  if (isLineGeom(mtype)) return { x: (geom.x1 + geom.x2) / 2, y: (geom.y1 + geom.y2) / 2 };
   if (mtype === "area")  return centroid(geom.points);
   return { x: geom.x, y: geom.y };
 }
@@ -86,9 +109,9 @@ function viewportCenter() {
   return { x: state.view.x + state.view.w / 2, y: state.view.y + state.view.h / 2 };
 }
 
-// ===== derived getters =====
-const activeMeasures = () => state.measures.filter(m => m.sheetId === state.activeSheetId);
-const measuresOnSheet = (sid) => state.measures.filter(m => m.sheetId === sid);
+// ===== derived getters (soft-deleted measures are excluded everywhere) =====
+const activeMeasures = () => state.measures.filter(m => m.sheetId === state.activeSheetId && !m.removed);
+const measuresOnSheet = (sid) => state.measures.filter(m => m.sheetId === sid && !m.removed);
 const getMeasure = (id) => state.measures.find(m => m.id === id);
 const orderedActiveIds = () => activeMeasures().map(m => m.id);
 
@@ -104,6 +127,17 @@ function clientToSvg(clientX, clientY) {
   const p = pt.matrixTransform(m.inverse());
   return { x: p.x, y: p.y };
 }
+// SVG user units -> client (screen) px — used to position HTML overlays (popover/readout)
+function svgToClient(x, y) {
+  const svg = document.getElementById("draw-svg");
+  const m = svg.getScreenCTM();
+  if (!m) return { x: 0, y: 0 };
+  const pt = svg.createSVGPoint();
+  pt.x = x; pt.y = y;
+  const p = pt.matrixTransform(m);
+  return { x: p.x, y: p.y };
+}
+const ft = (px) => px / PX_PER_FOOT;   // user units -> feet
 
 // ====================================================================
 //  RENDER — left Sheets sidebar (accordion w/ measurement list)
@@ -244,27 +278,72 @@ function measureSvg(m) {
       <text class="meas-label" fill="${m.color}" x="${c.x}" y="${c.y + 3}" text-anchor="middle">${label}</text>
     </g>`;
   }
+  if (m.mtype === "beam") {
+    const { x1, y1, x2, y2 } = m.geom;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const label = measureLabel(m);
+    return `<g class="meas ${sel ? "selected" : ""}" data-mid="${m.id}">
+      ${cp ? `<line class="copied-outline" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>` : ""}
+      <line class="meas-line-hit" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>
+      <line class="meas-beam" stroke="${m.color}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>
+      <line class="meas-beam-core" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>
+      <rect class="meas-label-bg" x="${mx - label.length * 3.6 - 4}" y="${my - 19}" width="${label.length * 7.2 + 8}" height="16" rx="3"/>
+      <text class="meas-label" fill="${m.color}" x="${mx}" y="${my - 7}" text-anchor="middle">${label}</text>
+    </g>`;
+  }
+  if (m.mtype === "joist") {
+    const { x1, y1, x2, y2 } = m.geom;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const label = measureLabel(m);
+    return `<g class="meas ${sel ? "selected" : ""}" data-mid="${m.id}">
+      ${cp ? `<line class="copied-outline" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>` : ""}
+      <line class="meas-line-hit" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>
+      <line class="meas-joist-run" stroke="${m.color}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>
+      <g stroke="${m.color}">${joistTicks(m.geom)}</g>
+      <rect class="meas-label-bg" x="${mx - label.length * 3.6 - 4}" y="${my - 9}" width="${label.length * 7.2 + 8}" height="16" rx="3"/>
+      <text class="meas-label" fill="${m.color}" x="${mx}" y="${my + 3}" text-anchor="middle">${label}</text>
+    </g>`;
+  }
   // point
   const { x, y } = m.geom;
   return `<g class="meas ${sel ? "selected" : ""}" data-mid="${m.id}">
     ${cp ? `<circle class="copied-outline" cx="${x}" cy="${y}" r="15"/>` : ""}
     <circle class="meas-point-dot" cx="${x}" cy="${y}" r="12" fill="${m.color}"/>
-    <text class="point-badge" x="${x}" y="${y + 4}">${m.geom.count || 1}</text>
+    <text class="point-badge" x="${x}" y="${y + 4}">${measureQty(m)}</text>
   </g>`;
+}
+
+// perpendicular tick marks along a joist/rafter run (every ~16px)
+function joistTicks(g) {
+  const len = dist(g.x1, g.y1, g.x2, g.y2) || 1;
+  const ux = (g.x2 - g.x1) / len, uy = (g.y2 - g.y1) / len;   // unit vector along run
+  const px = -uy, py = ux;                                     // perpendicular
+  const half = 6, step = 16;
+  let s = "";
+  for (let d = 0; d <= len; d += step) {
+    const cx = g.x1 + ux * d, cy = g.y1 + uy * d;
+    s += `<line class="joist-tick" x1="${cx - px * half}" y1="${cy - py * half}" x2="${cx + px * half}" y2="${cy + py * half}"/>`;
+  }
+  return s;
 }
 
 function selectionSvg(m) {
   let s = "";
-  if (m.mtype === "line") {
-    s += handle(m.geom.x1, m.geom.y1, m.id, "p1");
-    s += handle(m.geom.x2, m.geom.y2, m.id, "p2");
+  // Resize/move handles only appear in Move mode (gated editing).
+  const showHandles = state.tool === "move" || state.pasteMode;
+  if (isLineGeom(m.mtype)) {
+    s += `<line class="sel-outline-line" x1="${m.geom.x1}" y1="${m.geom.y1}" x2="${m.geom.x2}" y2="${m.geom.y2}"/>`;
+    if (showHandles) {
+      s += handle(m.geom.x1, m.geom.y1, m.id, "p1");
+      s += handle(m.geom.x2, m.geom.y2, m.id, "p2");
+    }
   } else if (m.mtype === "area") {
     const bb = measureBBox(m);
     s += `<rect class="sel-outline" x="${bb.x1 - 4}" y="${bb.y1 - 4}" width="${bb.x2 - bb.x1 + 8}" height="${bb.y2 - bb.y1 + 8}"/>`;
-    m.geom.points.forEach((p, i) => { s += handle(p.x, p.y, m.id, "v" + i); });
+    if (showHandles) m.geom.points.forEach((p, i) => { s += handle(p.x, p.y, m.id, "v" + i); });
   } else {
     s += `<circle class="sel-outline" cx="${m.geom.x}" cy="${m.geom.y}" r="17"/>`;
-    s += handle(m.geom.x, m.geom.y - 17, m.id, "pt", true);
+    if (showHandles) s += handle(m.geom.x, m.geom.y - 17, m.id, "pt", true);
   }
   return s;
 }
@@ -378,6 +457,7 @@ function copySelection() {
     return {
       _sourceId: m.id, _sourceSheetId: m.sheetId,
       name: m.name, mtype: m.mtype, color: m.color, sectionId: m.sectionId,
+      linearType: m.linearType, use: m.use,
       geom: JSON.parse(JSON.stringify(m.geom))
     };
   });
@@ -397,8 +477,10 @@ function setPasteMode(on) {
     if (svg && state.tool === "select") svg.style.cursor = "copy";
   } else {
     removePasteGhost();
-    if (svg) svg.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "select" ? "default" : "crosshair");
+    if (svg) svg.style.cursor = state.tool === "pan" ? "grab" : (state.tool === "move" ? "move" : (state.tool === "select" ? "default" : "crosshair"));
   }
+  updateModeIndicator();
+  updateStatusBar();
 }
 
 /**
@@ -424,51 +506,140 @@ function pasteClipboard(mode = "original", pt = null) {
   // For cursor mode, work out a single group offset so relative positions are kept
   let groupDx = 0, groupDy = 0;
   if (mode === "cursor") {
-    const target = pt || state.lastCanvasCursor || viewportCenter();
+    let target = pt || state.lastCanvasCursor || viewportCenter();
+    if (state.snap) { const sn = snapValue(target, null); if (sn) target = sn; }
     const gc = clipboardGroupCenter(state.clipboard);
     groupDx = target.x - gc.x;
     groupDy = target.y - gc.y;
   }
 
-  const newIds = [];
-  state.clipboard.forEach(clip => {
+  // Build the list of items to be pasted, computing final geometry + any collision.
+  const items = state.clipboard.map(clip => {
     const sameSheet = clip._sourceSheetId === state.activeSheetId;
     let dx, dy;
     if (mode === "cursor") {
       dx = groupDx; dy = groupDy;
     } else {
-      // original location: nudge same-sheet copies so they don't sit exactly on top
-      dx = sameSheet ? 36 : 0; dy = sameSheet ? 36 : 0;
+      // "Paste at Original Location" → EXACT 1:1 coordinates (no offset).
+      dx = 0; dy = 0;
     }
+    const geom = offsetGeom(JSON.parse(JSON.stringify(clip.geom)), clip.mtype, dx, dy);
+    const collideId = findCollision(geom, clip.mtype, null);
+    return { clip, dx, dy, geom, collideId, sameSheet };
+  });
+
+  const anyCollision = items.some(it => it.collideId);
+  if (anyCollision) {
+    // Stage the paste and ask the user how to resolve overlaps.
+    const anchor = mode === "cursor"
+      ? (pt || state.lastCanvasCursor || viewportCenter())
+      : geomCenter(items[0].geom, items[0].clip.mtype);
+    state.pendingPaste = { mode, items, anchor };
+    showCollidePopover(anchor, items.filter(it => it.collideId).length);
+    return;
+  }
+
+  finalizePaste("separate", items, mode);
+}
+
+// Find an existing active measurement of the same type whose center is within
+// COLLIDE_T of the given geometry. Returns its id, or null.
+function findCollision(geom, mtype, excludeIds) {
+  const c = geomCenter(geom, mtype);
+  let hit = null;
+  activeMeasures().forEach(m => {
+    if (m.mtype !== mtype) return;
+    if (excludeIds && excludeIds.has(m.id)) return;
+    const mc = geomCenter(m.geom, m.mtype);
+    if (dist(c.x, c.y, mc.x, mc.y) <= COLLIDE_T) hit = m.id;
+  });
+  return hit;
+}
+
+// Actually create / merge the pasted items.
+//   decision: "separate" | "merge" | "cancel"
+function finalizePaste(decision, items, mode) {
+  items = items || (state.pendingPaste && state.pendingPaste.items);
+  mode = mode || (state.pendingPaste && state.pendingPaste.mode) || "original";
+  hideCollidePopover();
+  state.pendingPaste = null;
+  if (!items || decision === "cancel") {
+    showToast("Paste cancelled", "", "fa-solid fa-ban");
+    return;
+  }
+
+  const newIds = [];
+  let merged = 0;
+  items.forEach(it => {
+    const clip = it.clip;
+    if (decision === "merge" && it.collideId) {
+      // Merge quantities into the existing measurement at that location.
+      const target = getMeasure(it.collideId);
+      if (target) {
+        const incomingQty = measureQty({ mtype: clip.mtype, geom: it.geom });
+        const before = measureQty(target);
+        target.qtyOverride = before + incomingQty;
+        state.history.push({ type: "merge", ts: Date.now(), keptId: target.id,
+          detail: `Merged a pasted ${MTYPE_META[clip.mtype].label} into ${target.name}: ${before.toFixed(1)} + ${incomingQty.toFixed(1)} ${MTYPE_META[clip.mtype].unit}` });
+        merged++;
+        return;
+      }
+    }
+    // Place separately → create a brand-new measurement.
     const sectionId = state.sections.some(s => s.id === clip.sectionId) ? clip.sectionId : state.sections[0].id;
     const nm = {
       id: nextId(),
       sheetId: state.activeSheetId,
       sectionId,
-      name: sameSheet ? clip.name + " (copy)" : clip.name,
+      name: it.sameSheet ? clip.name + " (copy)" : clip.name,
       mtype: clip.mtype,
       color: clip.color,
-      geom: offsetGeom(JSON.parse(JSON.stringify(clip.geom)), clip.mtype, dx, dy)
+      geom: it.geom,
+      linearType: clip.linearType,
+      use: clip.use
     };
     state.measures.push(nm);
     newIds.push(nm.id);
     const sec = state.sections.find(s => s.id === sectionId);
     if (sec) sec.expanded = true;
   });
-  state.selectedIds = new Set(newIds);
-  state.lastSelectedId = newIds[newIds.length - 1];
+
+  if (newIds.length) { state.selectedIds = new Set(newIds); state.lastSelectedId = newIds[newIds.length - 1]; }
   renderAll();
-  // flash pasted
   newIds.forEach(id => {
     const g = document.querySelector(`.meas[data-mid="${id}"]`);
     if (g) g.classList.add("just-pasted");
   });
+
   const sheet = state.sheets.find(s => s.id === state.activeSheetId);
   const where = mode === "cursor" ? "at cursor" : "at original location";
   const icon = mode === "cursor" ? "fa-solid fa-location-crosshairs" : "fa-solid fa-paste";
-  // keep the clipboard so the user can place more copies; stay in paste mode (Esc clears)
   setPasteMode(true);
-  showToast(`${newIds.length} measurement${newIds.length > 1 ? "s" : ""} pasted ${where} on ${sheet.name} — keep clicking to place more, Esc to finish`, "success", icon);
+  let msg;
+  if (merged && newIds.length) msg = `Merged ${merged} · placed ${newIds.length} ${where} on ${sheet.name}`;
+  else if (merged) msg = `Merged ${merged} measurement${merged > 1 ? "s" : ""} into existing — quantities combined`;
+  else msg = `${newIds.length} measurement${newIds.length > 1 ? "s" : ""} pasted ${where} on ${sheet.name} — keep clicking to place more, Esc to finish`;
+  showToast(msg, "success", icon);
+}
+
+// ---- collision popover (inline, near the paste location) ----
+function showCollidePopover(anchorSvgPt, nCollide) {
+  const pop = document.getElementById("collide-popover");
+  if (!pop) return;
+  const c = svgToClient(anchorSvgPt.x, anchorSvgPt.y);
+  // popover is position:fixed → use viewport (client) coordinates directly
+  let left = c.x + 14, top = c.y + 14;
+  left = Math.max(8, Math.min(left, window.innerWidth - 284));
+  top = Math.max(8, Math.min(top, window.innerHeight - 190));
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  const sub = document.getElementById("collide-sub");
+  if (sub) sub.textContent = `${nCollide} pasted item${nCollide > 1 ? "s" : ""} overlap an existing measurement at this location.`;
+  pop.classList.add("show");
+}
+function hideCollidePopover() {
+  const pop = document.getElementById("collide-popover");
+  if (pop) pop.classList.remove("show");
 }
 
 function deleteSelection() {
@@ -521,48 +692,64 @@ function onPointerDown(e) {
     return;
   }
 
-  // RESIZE handle?
+  const mod = e.shiftKey || e.ctrlKey || e.metaKey;
+
+  // RESIZE handle? (resize is only active in MOVE mode; handles aren't shown otherwise)
   const handleEl = e.target.closest(".handle");
-  if (handleEl) {
+  if (handleEl && state.tool === "move" && !mod) {
     const mid = handleEl.dataset.mid, h = handleEl.dataset.handle;
     const m = getMeasure(mid);
-    drag = { mode: "resize", mid, handle: h, start: p, snapshot: JSON.parse(JSON.stringify(m.geom)) };
+    drag = { mode: "resize", mid, handle: h, start: p,
+             snapshot: JSON.parse(JSON.stringify(m.geom)), selSet: new Set([mid]) };
     svg.setPointerCapture(e.pointerId);
     return;
   }
 
-  // MEASUREMENT body?
+  // MEASUREMENT body with a modifier → multi-select toggle / range (works in any tool)
   const g = e.target.closest(".meas");
+  if (g && mod) { selectMeasure(g.dataset.mid, e); return; }
+
+  // MEASUREMENT body, no modifier
   if (g) {
     const mid = g.dataset.mid;
-    // selection (respect modifiers)
-    if (e.shiftKey || e.ctrlKey || e.metaKey) {
-      selectMeasure(mid, e);
-      return; // don't start a move when modifier-selecting
+    if (state.tool === "move") {
+      // MOVE mode → select (if needed) then begin dragging all selected
+      if (!state.selectedIds.has(mid)) {
+        state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid; renderAll();
+      }
+      beginMove(p, e.pointerId);
+      return;
     }
-    if (!state.selectedIds.has(mid)) {
-      state.selectedIds.clear();
-      state.selectedIds.add(mid);
-      state.lastSelectedId = mid;
-      renderAll();
-    }
-    // begin move of all selected
-    const snap = {};
-    state.selectedIds.forEach(id => { snap[id] = JSON.parse(JSON.stringify(getMeasure(id).geom)); });
-    drag = { mode: "move", start: p, snapshot: snap, moved: false };
-    svg.setPointerCapture(e.pointerId);
+    // SELECT mode → click selects only; dragging-to-move is gated OFF (use the Move tool)
+    state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid;
+    closeContextMenu(); renderAll();
     return;
   }
 
-  // EMPTY canvas → rubber-band select (clear first unless additive)
-  if (!(e.ctrlKey || e.metaKey || e.shiftKey)) {
-    state.selectedIds.clear();
-    state.lastSelectedId = null;
-    renderAll();
-  }
-  drag = { mode: "band", start: p, additive: (e.ctrlKey || e.metaKey || e.shiftKey) };
+  // EMPTY canvas (or modifier-drag) → rubber-band box select.
+  // Ctrl/Shift held = additive (keeps the current selection).
+  if (!mod) { state.selectedIds.clear(); state.lastSelectedId = null; renderAll(); }
+  drag = { mode: "band", start: p, additive: mod };
   svg.setPointerCapture(e.pointerId);
   closeContextMenu();
+}
+
+// Begin a move-drag of all currently selected measurements
+function beginMove(p, pointerId) {
+  const svg = document.getElementById("draw-svg");
+  const snap = {};
+  state.selectedIds.forEach(id => { snap[id] = JSON.parse(JSON.stringify(getMeasure(id).geom)); });
+  const primary = getMeasure(state.lastSelectedId) || getMeasure([...state.selectedIds][0]);
+  drag = { mode: "move", start: p, snapshot: snap, moved: false,
+           anchorStart: anchorPoint(primary), selSet: new Set(state.selectedIds) };
+  if (pointerId != null) { try { svg.setPointerCapture(pointerId); } catch (_) {} }
+}
+// representative point of a measure used as the snap anchor while moving
+function anchorPoint(m) {
+  if (!m) return { x: 0, y: 0 };
+  if (isLineGeom(m.mtype)) return { x: m.geom.x1, y: m.geom.y1 };
+  if (m.mtype === "area")  return { x: m.geom.points[0].x, y: m.geom.points[0].y };
+  return { x: m.geom.x, y: m.geom.y };
 }
 
 function onPointerMove(e) {
@@ -580,28 +767,48 @@ function onPointerMove(e) {
   }
 
   if (drag.mode === "move") {
-    const dx = p.x - drag.start.x, dy = p.y - drag.start.y;
+    let dx = p.x - drag.start.x, dy = p.y - drag.start.y;
     if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
+    // SNAP the moved anchor point to nearby endpoints / grid
+    let snapInfo = null;
+    if (state.snap) {
+      const anchorNow = { x: drag.anchorStart.x + dx, y: drag.anchorStart.y + dy };
+      const sn = snapValue(anchorNow, drag.selSet);
+      if (sn) {
+        dx += sn.x - anchorNow.x;
+        dy += sn.y - anchorNow.y;
+        snapInfo = sn;
+      }
+    }
     Object.keys(drag.snapshot).forEach(id => {
       const m = getMeasure(id);
       m.geom = offsetGeom(drag.snapshot[id], m.mtype, dx, dy);
     });
     renderCanvas();
+    if (snapInfo) showSnapMarker(snapInfo); else hideSnapMarker();
+    updateCoordReadout({ x: drag.anchorStart.x + dx, y: drag.anchorStart.y + dy }, dx, dy);
     return;
   }
 
   if (drag.mode === "resize") {
     const m = getMeasure(drag.mid);
-    if (m.mtype === "line") {
-      if (drag.handle === "p1") { m.geom.x1 = p.x; m.geom.y1 = p.y; }
-      else { m.geom.x2 = p.x; m.geom.y2 = p.y; }
+    let np = p, snapInfo = null;
+    if (state.snap) {
+      const sn = snapValue(p, drag.selSet);
+      if (sn) { np = sn; snapInfo = sn; }
+    }
+    if (isLineGeom(m.mtype)) {
+      if (drag.handle === "p1") { m.geom.x1 = np.x; m.geom.y1 = np.y; }
+      else { m.geom.x2 = np.x; m.geom.y2 = np.y; }
     } else if (m.mtype === "area") {
       const i = parseInt(drag.handle.slice(1), 10);
-      m.geom.points[i] = { x: p.x, y: p.y };
+      m.geom.points[i] = { x: np.x, y: np.y };
     } else {
-      m.geom.x = p.x; m.geom.y = p.y + 17;   // 'pt' move handle sits above the dot
+      m.geom.x = np.x; m.geom.y = np.y + 17;   // 'pt' move handle sits above the dot
     }
     renderCanvas();
+    if (snapInfo) showSnapMarker(snapInfo); else hideSnapMarker();
+    updateCoordReadout(np, null, null);
     return;
   }
 
@@ -619,6 +826,7 @@ function onPointerUp(e) {
   if (drag.mode === "pan") { svg.classList.remove("panning"); drag = null; return; }
 
   if (drag.mode === "move") {
+    hideSnapMarker(); hideCoordReadout();
     if (drag.moved) {
       renderAll();
       const n = state.selectedIds.size;
@@ -629,6 +837,7 @@ function onPointerUp(e) {
   }
 
   if (drag.mode === "resize") {
+    hideSnapMarker(); hideCoordReadout();
     renderAll();
     showToast(`Resized — ${measureLabel(getMeasure(drag.mid))}`, "info", "fa-solid fa-up-right-and-down-left-from-center");
     drag = null;
@@ -671,6 +880,83 @@ function drawRubberBand(a, b) {
   r.setAttribute("height", Math.abs(b.y - a.y));
 }
 function removeRubberBand() { const r = document.getElementById("rubber"); if (r) r.remove(); }
+
+// ====================================================================
+//  SNAPPING — endpoints of other measures (priority) then the grid
+// ====================================================================
+// Collect candidate snap points (endpoints / vertices / point centers)
+// from every active measure that is NOT part of the current drag set.
+function getSnapTargets(excludeIds) {
+  const pts = [];
+  activeMeasures().forEach(m => {
+    if (excludeIds && excludeIds.has(m.id)) return;
+    if (isLineGeom(m.mtype)) {
+      pts.push({ x: m.geom.x1, y: m.geom.y1 }, { x: m.geom.x2, y: m.geom.y2 },
+               { x: (m.geom.x1 + m.geom.x2) / 2, y: (m.geom.y1 + m.geom.y2) / 2 });
+    } else if (m.mtype === "area") {
+      m.geom.points.forEach(p => pts.push({ x: p.x, y: p.y }));
+    } else {
+      pts.push({ x: m.geom.x, y: m.geom.y });
+    }
+  });
+  return pts;
+}
+// Return a snapped point {x,y,kind} for `p`, or null if nothing within tolerance.
+// Endpoint snapping wins; grid snapping is the fallback.
+function snapValue(p, excludeIds) {
+  // 1) endpoint / vertex snap
+  let best = null, bestD = SNAP_ENDPOINT_T;
+  getSnapTargets(excludeIds).forEach(t => {
+    const d = dist(p.x, p.y, t.x, t.y);
+    if (d < bestD) { bestD = d; best = { x: t.x, y: t.y, kind: "endpoint" }; }
+  });
+  if (best) return best;
+  // 2) grid snap
+  const gx = Math.round(p.x / GRID) * GRID, gy = Math.round(p.y / GRID) * GRID;
+  if (Math.abs(p.x - gx) <= SNAP_GRID_T && Math.abs(p.y - gy) <= SNAP_GRID_T) {
+    return { x: gx, y: gy, kind: "grid" };
+  }
+  return null;
+}
+// Draw the pulsing snap indicator at the snapped location.
+function showSnapMarker(sn) {
+  const svg = document.getElementById("draw-svg");
+  if (!svg) return;
+  let g = document.getElementById("snap-indicator");
+  if (!g) {
+    g = document.createElementNS(SVG_NS, "g");
+    g.id = "snap-indicator";
+    g.setAttribute("pointer-events", "none");
+    svg.appendChild(g);
+  }
+  const cls = sn.kind === "endpoint" ? "snap-marker pulse" : "snap-marker grid";
+  g.innerHTML =
+    `<line class="snap-cross ${sn.kind}" x1="${sn.x - 10}" y1="${sn.y}" x2="${sn.x + 10}" y2="${sn.y}"/>
+     <line class="snap-cross ${sn.kind}" x1="${sn.x}" y1="${sn.y - 10}" x2="${sn.x}" y2="${sn.y + 10}"/>
+     <circle class="${cls}" cx="${sn.x}" cy="${sn.y}" r="${sn.kind === "endpoint" ? 7 : 5}"/>`;
+}
+function hideSnapMarker() { const g = document.getElementById("snap-indicator"); if (g) g.remove(); }
+
+// ====================================================================
+//  COORDINATE READOUT — live X/Y (ft) + delta while moving / resizing
+// ====================================================================
+function updateCoordReadout(svgPt, dx, dy) {
+  const el = document.getElementById("coord-readout");
+  if (!el) return;
+  const c = svgToClient(svgPt.x, svgPt.y);
+  const wrap = document.getElementById("canvas-sheet-wrap");
+  const wr = wrap.getBoundingClientRect();
+  el.style.left = (c.x - wr.left + 14) + "px";
+  el.style.top = (c.y - wr.top - 14) + "px";
+  let html = `<span>X ${ft(svgPt.x).toFixed(1)}′ · Y ${ft(svgPt.y).toFixed(1)}′</span>`;
+  if (dx != null && dy != null) {
+    const d = ft(Math.hypot(dx, dy));
+    html += `<span class="cr-delta">Δ ${d.toFixed(1)}′ from start</span>`;
+  }
+  el.innerHTML = html;
+  el.classList.add("show");
+}
+function hideCoordReadout() { const el = document.getElementById("coord-readout"); if (el) el.classList.remove("show"); }
 
 // Right-click on canvas
 function onCanvasContextMenu(e) {
@@ -835,6 +1121,171 @@ function convertGeom(m, newType) {
 }
 
 // ====================================================================
+//  COMBINE SAME KM  (merge several measurements of the same Key Measure)
+// ====================================================================
+const normName = (s) => (s || "").trim().toLowerCase();
+
+function combineSameKM() {
+  const ms = [...state.selectedIds].map(getMeasure).filter(m => m && !m.removed);
+  if (ms.length < 2) { showToast("Select 2 or more measurements to combine", "error", "fa-solid fa-triangle-exclamation"); return; }
+
+  // 1) KM names must match
+  const names = ms.map(m => normName(m.name));
+  if (new Set(names).size > 1) { showCantCombineModal(ms); return; }
+
+  // 2) names match → check whether other attributes differ
+  const attrsDiffer =
+    new Set(ms.map(m => (m.color || "").toLowerCase())).size > 1 ||
+    new Set(ms.map(m => m.sectionId)).size > 1 ||
+    new Set(ms.map(m => m.linearType || "basic")).size > 1 ||
+    new Set(ms.map(m => normName(m.use))).size > 1;
+
+  if (attrsDiffer) { showConflictModal(ms); return; }
+
+  // 3) clean match → combine straight away using the first measure's attributes
+  const f = ms[0];
+  performCombine(ms, { color: f.color, sectionId: f.sectionId, linearType: f.linearType || "basic", use: f.use || "" });
+}
+
+// Merge `ms` into the first selected measure; soft-delete the rest; log an audit entry.
+function performCombine(ms, attrs) {
+  const kept = ms[0];
+  const others = ms.slice(1);
+  const totalQty = ms.reduce((sum, m) => sum + measureQty(m), 0);
+  const removedDetail = others.map(m => `${m.name} (${measureQty(m).toFixed(1)} ${MTYPE_META[m.mtype].unit})`);
+
+  kept.qtyOverride = (attrs && attrs.qtyOverride != null) ? attrs.qtyOverride : totalQty;
+  if (attrs) {
+    if (attrs.color) kept.color = attrs.color;
+    if (attrs.sectionId) kept.sectionId = attrs.sectionId;
+    if (attrs.linearType) kept.linearType = attrs.linearType;
+    if (attrs.use != null) kept.use = attrs.use;
+  }
+  others.forEach(m => { m.removed = true; });
+
+  state.history.push({
+    type: "combine", ts: Date.now(), keptId: kept.id,
+    removedIds: others.map(m => m.id),
+    detail: `Combined ${ms.length} "${kept.name}" measurements → ${MTYPE_META[kept.mtype].unit === "EA" ? Math.round(kept.qtyOverride) : kept.qtyOverride.toFixed(1)} ${MTYPE_META[kept.mtype].unit} (absorbed: ${removedDetail.join(", ")})`
+  });
+
+  state.selectedIds = new Set([kept.id]);
+  state.lastSelectedId = kept.id;
+  renderAll();
+  showToast(`Combined ${ms.length} measurements into "${kept.name}" — quantities summed & ${others.length} archived`, "success", "fa-solid fa-object-group");
+}
+
+// Generic modal-overlay builder (returns the overlay element).
+function buildModal(innerHtml) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal-box">${innerHtml}</div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+// "Can't combine — KM names differ"
+function showCantCombineModal(ms) {
+  const list = ms.map(m => `<div class="combine-row"><span class="combine-name">${m.name}</span><span class="audit-badge">${MTYPE_META[m.mtype].label}</span></div>`).join("");
+  const overlay = buildModal(`
+    <h4><i class="fa-solid fa-triangle-exclamation" style="color:#e0a800;"></i> Can't Combine</h4>
+    <div class="modal-sub">The selected measurements belong to different Key Measures.</div>
+    <p class="modal-note">Combining is only allowed when every selected item shares the same KM name. Rename them to match first, or select items of the same KM.</p>
+    <div class="combine-list">${list}</div>
+    <div class="modal-btns"><button class="primary">OK</button></div>
+  `);
+  const close = () => overlay.remove();
+  overlay.querySelector(".primary").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.addEventListener("keydown", (e) => { if (e.key === "Escape" || e.key === "Enter") close(); });
+  overlay.querySelector(".primary").focus();
+}
+
+// Conflict-resolution modal (names match, other attributes differ)
+function showConflictModal(ms) {
+  const f = ms[0];
+  const sumQty = ms.reduce((s, m) => s + measureQty(m), 0);
+  const unit = MTYPE_META[f.mtype].unit;
+  const sumDisplay = unit === "EA" ? String(Math.round(sumQty)) : sumQty.toFixed(1);
+
+  const sectionOpts = state.sections.map(s =>
+    `<option value="${s.id}" ${s.id === f.sectionId ? "selected" : ""}>${s.name}</option>`).join("");
+  const listRows = ms.map(m => `
+    <div class="combine-row">
+      <span class="combine-name">${m.name}</span>
+      <span class="audit-badge">${unit === "EA" ? Math.round(measureQty(m)) : measureQty(m).toFixed(1)} ${unit}</span>
+    </div>`).join("");
+
+  const overlay = buildModal(`
+    <h4><i class="fa-solid fa-object-group" style="color:#1a47ba;"></i> Resolve & Combine ${ms.length} Measurements</h4>
+    <div class="modal-sub">"${f.name}" — same KM name, but some attributes differ. Choose the values to keep.</div>
+    <div class="combine-list">${listRows}</div>
+
+    <div class="modal-row">
+      <div>
+        <label>Linear Type</label>
+        <select id="cf-lineartype">
+          <option value="basic" ${(f.linearType||"basic")==="basic"?"selected":""}>Basic</option>
+          <option value="linearPitch" ${f.linearType==="linearPitch"?"selected":""}>Linear Pitch</option>
+        </select>
+      </div>
+      <div>
+        <label>Section</label>
+        <select id="cf-section">${sectionOpts}</select>
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <div>
+        <label>Combined Quantity (${unit})</label>
+        <input type="number" id="cf-multiplier" value="${sumDisplay}" step="${unit==="EA"?"1":"0.1"}">
+      </div>
+      <div>
+        <label>Use <span style="color:#9aa7b3;font-weight:400;">(optional)</span></label>
+        <input type="text" id="cf-use" value="${(f.use||"").replace(/"/g,"&quot;")}" placeholder="e.g. Center carry beam">
+      </div>
+    </div>
+
+    <label class="conflict-confirm"><input type="checkbox" id="cf-confirm"> I confirm the combined quantity above (${sumDisplay} ${unit}, summed from ${ms.length} items)</label>
+
+    <label>Color</label>
+    <div class="color-picks" id="cf-colors">
+      ${COLOR_SWATCHES.map(c => `<span class="color-pick ${c.toLowerCase()===f.color.toLowerCase()?"selected":""}" data-color="${c}" style="background:${c}"></span>`).join("")}
+    </div>
+
+    <div class="modal-btns">
+      <button class="cancel">Cancel</button>
+      <button class="primary" disabled>Combine</button>
+    </div>
+  `);
+
+  let color = f.color;
+  const confirmBox = overlay.querySelector("#cf-confirm");
+  const primaryBtn = overlay.querySelector(".primary");
+  confirmBox.addEventListener("change", () => { primaryBtn.disabled = !confirmBox.checked; });
+  overlay.querySelectorAll(".color-pick").forEach(sw => sw.addEventListener("click", () => {
+    overlay.querySelectorAll(".color-pick").forEach(s => s.classList.remove("selected"));
+    sw.classList.add("selected"); color = sw.dataset.color;
+  }));
+  const close = () => overlay.remove();
+  overlay.querySelector(".cancel").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  primaryBtn.addEventListener("click", () => {
+    if (!confirmBox.checked) return;
+    const qv = parseFloat(overlay.querySelector("#cf-multiplier").value);
+    performCombine(ms, {
+      color,
+      sectionId: overlay.querySelector("#cf-section").value,
+      linearType: overlay.querySelector("#cf-lineartype").value,
+      use: overlay.querySelector("#cf-use").value.trim(),
+      qtyOverride: isNaN(qv) ? sumQty : qv
+    });
+    close();
+  });
+  overlay.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+}
+
+// ====================================================================
 //  TOAST
 // ====================================================================
 let toastTimer = null;
@@ -857,7 +1308,54 @@ function setTool(tool) {
   document.querySelectorAll(".ctool[data-tool]").forEach(b => b.classList.toggle("active", b.dataset.tool === tool));
   const svg = document.getElementById("draw-svg");
   svg.style.cursor = tool === "pan" ? "grab"
+    : tool === "move" ? "move"
     : (tool === "select" ? (state.pasteMode ? "copy" : "default") : "crosshair");
+  updateModeIndicator();
+  updateStatusBar();
+  renderCanvas();          // re-render so selection handles show/hide with the mode
+}
+
+// Toggle the canvas mode outline + floating badge (Move / Paste / Select).
+function updateModeIndicator() {
+  const wrap = document.getElementById("canvas-sheet-wrap");
+  const badge = document.getElementById("mode-badge");
+  const txt = document.getElementById("mode-badge-text");
+  if (!wrap || !badge) return;
+  wrap.classList.remove("mode-move", "mode-paste");
+  badge.classList.remove("show", "move", "paste");
+  if (state.pasteMode) {
+    wrap.classList.add("mode-paste");
+    badge.classList.add("show", "paste");
+    if (txt) txt.textContent = "PASTE MODE — click to place · Esc to finish";
+  } else if (state.tool === "move") {
+    wrap.classList.add("mode-move");
+    badge.classList.add("show", "move");
+    if (txt) txt.textContent = "MOVE MODE — drag to reposition · Esc to finish";
+  }
+}
+
+// Update the bottom status bar (active tool + contextual hint).
+function updateStatusBar() {
+  const toolEl = document.getElementById("status-tool");
+  const hintEl = document.getElementById("status-hint");
+  const snapEl = document.getElementById("status-snap");
+  if (snapEl) snapEl.textContent = state.snap ? "Snap: On" : "Snap: Off";
+  let label = "Select", hint = "Click to select · Ctrl/Shift-click to multi-select · Ctrl-drag to box-select";
+  if (state.pasteMode) {
+    label = "Paste"; hint = "Click on the canvas to drop a copy · Esc to finish";
+  } else if (state.tool === "move") {
+    label = "Move"; hint = "Drag a measurement to reposition · snaps to endpoints & grid · Esc to finish";
+  } else if (state.tool === "pan") {
+    label = "Pan"; hint = "Drag to pan the sheet · scroll to zoom";
+  }
+  if (toolEl) toolEl.textContent = label;
+  if (hintEl) hintEl.textContent = hint;
+}
+
+// Enable the Combine button only when 2+ measurements are selected.
+function updateToolbarState() {
+  const btn = document.getElementById("btn-combine");
+  if (btn) btn.disabled = state.selectedIds.size < 2;
 }
 function resetView() { state.view = { x: 0, y: 0, w: VIEW_W, h: VIEW_H }; }
 function zoomBy(factor, cx, cy) {
@@ -875,7 +1373,7 @@ function zoomBy(factor, cx, cy) {
 // ====================================================================
 //  GLOBAL EVENTS / WIRING
 // ====================================================================
-function renderAll() { renderSheets(); renderCanvas(); renderTree(); updateClipboardIndicator(); }
+function renderAll() { renderSheets(); renderCanvas(); renderTree(); updateClipboardIndicator(); updateToolbarState(); }
 
 let spaceDown = false;
 document.addEventListener("keydown", (e) => {
@@ -887,13 +1385,21 @@ document.addEventListener("keydown", (e) => {
   else if (ctrl && e.shiftKey && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("original"); }
   else if (ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); pasteClipboard("cursor", state.lastCanvasCursor); }
   else if (ctrl && (e.key === "a" || e.key === "A")) { e.preventDefault(); selectAll(); }
+  else if (!ctrl && (e.key === "v" || e.key === "V")) { e.preventDefault(); setTool("select"); }
+  else if (!ctrl && (e.key === "m" || e.key === "M")) { e.preventDefault(); setTool("move"); }
+  else if (!ctrl && (e.key === "h" || e.key === "H")) { e.preventDefault(); setTool("pan"); }
   else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
   else if (e.key === "Escape") {
     closeContextMenu();
-    if (state.pasteMode || state.clipboard.length) {
+    if (state.pendingPaste) {            // a collision decision is pending → cancel it
+      finalizePaste("cancel");
+    } else if (state.pasteMode || state.clipboard.length) {
       clearClipboard();         // clear clipboard, remove ghost, exit paste mode
       clearSelection();         // also drop any selection
       showToast("Clipboard cleared — paste mode off", "", "fa-solid fa-ban");
+    } else if (state.tool !== "select") {
+      setTool("select");        // commit & exit Move / Pan mode back to Select
+      showToast("Back to Select mode", "", "fa-solid fa-arrow-pointer");
     } else {
       clearSelection();
     }
@@ -935,6 +1441,12 @@ document.getElementById("tab-sections").addEventListener("click", () => {
 
 // Canvas toolbar tools
 document.querySelectorAll(".ctool[data-tool]").forEach(btn => btn.addEventListener("click", () => setTool(btn.dataset.tool)));
+// Combine Same KM
+document.getElementById("btn-combine").addEventListener("click", function () { if (!this.disabled) combineSameKM(); });
+// Collision popover buttons
+document.getElementById("collide-merge").addEventListener("click", () => finalizePaste("merge"));
+document.getElementById("collide-separate").addEventListener("click", () => finalizePaste("separate"));
+document.getElementById("collide-cancel").addEventListener("click", () => finalizePaste("cancel"));
 document.getElementById("zoom-in").addEventListener("click", () => zoomBy(1.25));
 document.getElementById("zoom-out").addEventListener("click", () => zoomBy(1 / 1.25));
 document.getElementById("zoom-fit").addEventListener("click", () => { resetView(); renderCanvas(); });
@@ -966,7 +1478,7 @@ function onCanvasHover(e) {
   else removePasteGhost();
 }
 function ghostShape(geom, mtype, color) {
-  if (mtype === "line")
+  if (isLineGeom(mtype))
     return `<line class="ghost-line" stroke="${color}" x1="${geom.x1}" y1="${geom.y1}" x2="${geom.x2}" y2="${geom.y2}"/>`;
   if (mtype === "area")
     return `<polygon class="ghost-poly" points="${geom.points.map(p => `${p.x},${p.y}`).join(" ")}" fill="${color}" stroke="${color}"/>`;
@@ -983,18 +1495,23 @@ function updatePasteGhost(pt) {
     g.setAttribute("pointer-events", "none");
     svg.appendChild(g);
   }
+  let target = pt;
+  let snapInfo = null;
+  if (state.snap) { const sn = snapValue(pt, null); if (sn) { target = sn; snapInfo = sn; } }
   const gc = clipboardGroupCenter(state.clipboard);
-  const dx = pt.x - gc.x, dy = pt.y - gc.y;
+  const dx = target.x - gc.x, dy = target.y - gc.y;
   let inner = "";
   state.clipboard.forEach(clip => {
     const geom = offsetGeom(JSON.parse(JSON.stringify(clip.geom)), clip.mtype, dx, dy);
     inner += ghostShape(geom, clip.mtype, clip.color);
   });
-  // crosshair marker at the cursor (paste anchor)
-  inner += `<line class="ghost-cross" x1="${pt.x - 9}" y1="${pt.y}" x2="${pt.x + 9}" y2="${pt.y}"/>
-            <line class="ghost-cross" x1="${pt.x}" y1="${pt.y - 9}" x2="${pt.x}" y2="${pt.y + 9}"/>`;
+  // crosshair marker at the (snapped) paste anchor
+  inner += `<line class="ghost-cross" x1="${target.x - 9}" y1="${target.y}" x2="${target.x + 9}" y2="${target.y}"/>
+            <line class="ghost-cross" x1="${target.x}" y1="${target.y - 9}" x2="${target.x}" y2="${target.y + 9}"/>`;
+  if (snapInfo) inner += `<circle class="snap-marker pulse" cx="${target.x}" cy="${target.y}" r="7"/>`;
   // "Click to paste" hint next to the cursor
-  inner += `<text class="ghost-hint" x="${pt.x + 14}" y="${pt.y - 12}">Click to paste · Esc to cancel</text>`;
+  const hintTxt = snapInfo ? (snapInfo.kind === "endpoint" ? "Snap to endpoint · click to paste" : "Snap to grid · click to paste") : "Click to paste · Esc to cancel";
+  inner += `<text class="ghost-hint" x="${target.x + 14}" y="${target.y - 12}">${hintTxt}</text>`;
   g.innerHTML = inner;
 }
 function removePasteGhost() {
