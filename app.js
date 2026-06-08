@@ -713,18 +713,13 @@ function onPointerDown(e) {
   const g = e.target.closest(".meas");
   if (g && mod) { selectMeasure(g.dataset.mid, e); return; }
 
-  // MEASUREMENT body, no modifier → select (if needed) then begin a direct move-drag.
-  // A click without movement collapses the selection to just this measurement.
+  // MEASUREMENT body, no modifier → select only.
+  // Dragging to move is intentionally disabled outside paste mode to prevent
+  // accidental movement during normal review/selection.
   if (g) {
     const mid = g.dataset.mid;
-    const wasSelected = state.selectedIds.has(mid);
-    if (!wasSelected) {
-      state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid; renderAll();
-    }
+    state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid; renderAll();
     closeContextMenu();
-    beginMove(p, e.pointerId);
-    drag.clickMid = mid;          // remember for click-vs-drag resolution on pointer-up
-    drag.multiWasSelected = wasSelected && state.selectedIds.size > 1;
     return;
   }
 
@@ -1379,18 +1374,15 @@ function showConflictModal(ms) {
       <div class="modal-sub">Combining ${ms.length} measurements into one. Review the properties to keep — quantities are summed automatically (${sumDisplay} ${unit}).</div>
       <div class="combine-list">${listRows}</div>
       ${propsFormHtml(cfBase, "cf")}
-      <label class="conflict-confirm"><input type="checkbox" id="cf-confirm"> I confirm combining these ${ms.length} items (total ${sumDisplay} ${unit})</label>
       <div class="modal-btns">
         <button class="cancel">Cancel</button>
-        <button class="primary" disabled>Combine</button>
+        <button class="primary">Combine</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
 
   const collect = wirePropsForm(overlay, cfBase, "cf");
-  const confirmBox = overlay.querySelector("#cf-confirm");
   const primaryBtn = overlay.querySelector(".primary");
-  confirmBox.addEventListener("change", () => { primaryBtn.disabled = !confirmBox.checked; });
 
   const onDocClick = (e) => {
     const pop = overlay.querySelector("#cf-color-pop");
@@ -1403,7 +1395,6 @@ function showConflictModal(ms) {
   overlay.querySelector(".modal-x").addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
   primaryBtn.addEventListener("click", () => {
-    if (!confirmBox.checked) return;
     const v = collect();
     performCombine(ms, {
       name: v.name,
@@ -1465,7 +1456,7 @@ function updateStatusBar() {
   const hintEl = document.getElementById("status-hint");
   const snapEl = document.getElementById("status-snap");
   if (snapEl) snapEl.textContent = state.snap ? "Snap: On" : "Snap: Off";
-  let hint = "Click to select · drag to move · Ctrl/Shift-click to multi-select · Ctrl-drag to box-select";
+  let hint = "Click to select · Ctrl/Shift-click to multi-select · Ctrl-drag to box-select";
   if (state.pasteMode) {
     hint = "Click on the canvas to drop a copy · Esc to finish";
   }
