@@ -726,23 +726,8 @@ function onPointerDown(e) {
   closeContextMenu();
 }
 
-// Begin a move-drag of all currently selected measurements
-function beginMove(p, pointerId) {
-  const svg = document.getElementById("draw-svg");
-  const snap = {};
-  state.selectedIds.forEach(id => { snap[id] = JSON.parse(JSON.stringify(getMeasure(id).geom)); });
-  const primary = getMeasure(state.lastSelectedId) || getMeasure([...state.selectedIds][0]);
-  drag = { mode: "move", start: p, snapshot: snap, moved: false,
-           anchorStart: anchorPoint(primary), selSet: new Set(state.selectedIds) };
-  if (pointerId != null) { try { svg.setPointerCapture(pointerId); } catch (_) {} }
-}
-// representative point of a measure used as the snap anchor while moving
-function anchorPoint(m) {
-  if (!m) return { x: 0, y: 0 };
-  if (isLineGeom(m.mtype)) return { x: m.geom.x1, y: m.geom.y1 };
-  if (m.mtype === "area")  return { x: m.geom.points[0].x, y: m.geom.points[0].y };
-  return { x: m.geom.x, y: m.geom.y };
-}
+// NOTE: beginMove() / anchorPoint() were removed along with drag-to-move.
+// Placed measurements are position-locked; there is no move-drag entry point.
 
 function onPointerMove(e) {
   if (!drag) return;
@@ -758,51 +743,9 @@ function onPointerMove(e) {
     return;
   }
 
-  if (drag.mode === "move") {
-    let dx = p.x - drag.start.x, dy = p.y - drag.start.y;
-    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) drag.moved = true;
-    // SNAP the moved anchor point to nearby endpoints / grid
-    let snapInfo = null;
-    if (state.snap) {
-      const anchorNow = { x: drag.anchorStart.x + dx, y: drag.anchorStart.y + dy };
-      const sn = snapValue(anchorNow, drag.selSet);
-      if (sn) {
-        dx += sn.x - anchorNow.x;
-        dy += sn.y - anchorNow.y;
-        snapInfo = sn;
-      }
-    }
-    Object.keys(drag.snapshot).forEach(id => {
-      const m = getMeasure(id);
-      m.geom = offsetGeom(drag.snapshot[id], m.mtype, dx, dy);
-    });
-    renderCanvas();
-    if (snapInfo) showSnapMarker(snapInfo); else hideSnapMarker();
-    updateCoordReadout({ x: drag.anchorStart.x + dx, y: drag.anchorStart.y + dy }, dx, dy);
-    return;
-  }
-
-  if (drag.mode === "resize") {
-    const m = getMeasure(drag.mid);
-    let np = p, snapInfo = null;
-    if (state.snap) {
-      const sn = snapValue(p, drag.selSet);
-      if (sn) { np = sn; snapInfo = sn; }
-    }
-    if (isLineGeom(m.mtype)) {
-      if (drag.handle === "p1") { m.geom.x1 = np.x; m.geom.y1 = np.y; }
-      else { m.geom.x2 = np.x; m.geom.y2 = np.y; }
-    } else if (m.mtype === "area") {
-      const i = parseInt(drag.handle.slice(1), 10);
-      m.geom.points[i] = { x: np.x, y: np.y };
-    } else {
-      m.geom.x = np.x; m.geom.y = np.y + 17;   // 'pt' move handle sits above the dot
-    }
-    renderCanvas();
-    if (snapInfo) showSnapMarker(snapInfo); else hideSnapMarker();
-    updateCoordReadout(np, null, null);
-    return;
-  }
+  // NOTE: "move" and "resize" drag modes have been removed. Placed
+  // measurements are position-locked and cannot be moved or reshaped by
+  // dragging. Only "pan" and "band" (box-select) drags are supported here.
 
   if (drag.mode === "band") {
     drawRubberBand(drag.start, p);
@@ -817,29 +760,8 @@ function onPointerUp(e) {
 
   if (drag.mode === "pan") { svg.classList.remove("panning"); drag = null; return; }
 
-  if (drag.mode === "move") {
-    hideSnapMarker(); hideCoordReadout();
-    if (drag.moved) {
-      renderAll();
-      const n = state.selectedIds.size;
-      showToast(`Moved ${n} measurement${n > 1 ? "s" : ""}`, "info", "fa-solid fa-up-down-left-right");
-    } else if (drag.clickMid && drag.multiWasSelected) {
-      // A plain click (no drag) on an already-multi-selected item collapses
-      // the selection down to just that one measurement.
-      state.selectedIds.clear(); state.selectedIds.add(drag.clickMid); state.lastSelectedId = drag.clickMid;
-      renderAll();
-    }
-    drag = null;
-    return;
-  }
-
-  if (drag.mode === "resize") {
-    hideSnapMarker(); hideCoordReadout();
-    renderAll();
-    showToast(`Resized — ${measureLabel(getMeasure(drag.mid))}`, "info", "fa-solid fa-up-right-and-down-left-from-center");
-    drag = null;
-    return;
-  }
+  // NOTE: "move" and "resize" drag modes have been removed — placed
+  // measurements are position-locked. Only pan and box-select remain.
 
   if (drag.mode === "band") {
     const p = clientToSvg(e.clientX, e.clientY);
