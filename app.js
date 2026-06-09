@@ -339,11 +339,12 @@ function joistTicks(g) {
 
 function selectionSvg(m) {
   let s = "";
-  // Measurements are POSITION-LOCKED after placement. We render only the
-  // selection outline (visual feedback) and never any draggable resize/move
-  // handles, so a placed measurement can never be moved or reshaped by the
-  // mouse. The only movable item is the ghost preview during paste mode.
-  const showHandles = false;
+  // A selected measurement shows its outline plus RESIZE handles (small corner
+  // dots). Dragging a handle reshapes the measurement (line endpoints / area
+  // corners / point location). The measurement BODY is position-locked — only
+  // the handles are draggable, so the shape can never be moved as a whole unit
+  // by accident. Handles are hidden during paste mode (the ghost is movable).
+  const showHandles = !state.pasteMode;
   if (isLineGeom(m.mtype)) {
     s += `<line class="sel-outline-line" x1="${m.geom.x1}" y1="${m.geom.y1}" x2="${m.geom.x2}" y2="${m.geom.y2}"/>`;
     if (showHandles) {
@@ -356,7 +357,8 @@ function selectionSvg(m) {
     if (showHandles) m.geom.points.forEach((p, i) => { s += handle(p.x, p.y, m.id, "v" + i); });
   } else {
     s += `<circle class="sel-outline" cx="${m.geom.x}" cy="${m.geom.y}" r="17"/>`;
-    if (showHandles) s += handle(m.geom.x, m.geom.y - 17, m.id, "pt", true);
+    // a single center handle lets the user reposition a point measurement
+    if (showHandles) s += handle(m.geom.x, m.geom.y, m.id, "pt", true);
   }
   return s;
 }
@@ -700,17 +702,29 @@ function onPointerDown(e) {
 
   const mod = e.shiftKey || e.ctrlKey || e.metaKey;
 
-  // NOTE: Resize/move handles are intentionally NOT rendered for placed
-  // measurements (see selectionSvg → showHandles = false). Measurements are
-  // position-locked, so there is no resize-drag entry point here.
+  // RESIZE handle? Handles are the ONLY draggable part of a placed measurement.
+  // Dragging a handle reshapes the measurement (endpoint / corner / point) but
+  // never moves the whole body, so the position stays locked.
+  const handleEl = e.target.closest(".handle");
+  if (handleEl && !mod) {
+    const mid = handleEl.dataset.mid, h = handleEl.dataset.handle;
+    const m = getMeasure(mid);
+    if (m) {
+      drag = { mode: "resize", mid, handle: h, start: p, moved: false,
+               snapshot: JSON.parse(JSON.stringify(m.geom)), selSet: new Set([mid]) };
+      svg.setPointerCapture(e.pointerId);
+      closeContextMenu();
+      return;
+    }
+  }
 
   // MEASUREMENT body with a modifier → multi-select toggle / range
   const g = e.target.closest(".meas");
   if (g && mod) { selectMeasure(g.dataset.mid, e); return; }
 
   // MEASUREMENT body, no modifier → select only.
-  // Dragging to move is intentionally disabled outside paste mode to prevent
-  // accidental movement during normal review/selection.
+  // Dragging the body to move is intentionally disabled to prevent accidental
+  // repositioning. Only the resize handles (above) can change the geometry.
   if (g) {
     const mid = g.dataset.mid;
     state.selectedIds.clear(); state.selectedIds.add(mid); state.lastSelectedId = mid; renderAll();
@@ -743,9 +757,33 @@ function onPointerMove(e) {
     return;
   }
 
-  // NOTE: "move" and "resize" drag modes have been removed. Placed
-  // measurements are position-locked and cannot be moved or reshaped by
-  // dragging. Only "pan" and "band" (box-select) drags are supported here.
+  // RESIZE: drag a single handle to reshape the measurement. The body stays
+  // put — only the dragged endpoint / corner / point moves. Quantities update
+  // live because renderCanvas() re-reads the geometry each frame.
+  if (drag.mode === "resize") {
+    if (Math.abs(p.x - drag.start.x) > 1 || Math.abs(p.y - drag.start.y) > 1) drag.moved = true;
+    const m = getMeasure(drag.mid);
+    if (!m) { return; }
+    let np = p, snapInfo = null;
+    if (state.snap) {
+      const sn = snapValue(p, drag.selSet);
+      if (sn) { np = sn; snapInfo = sn; }
+    }
+    if (isLineGeom(m.mtype)) {
+      if (drag.handle === "p1") { m.geom.x1 = np.x; m.geom.y1 = np.y; }
+      else { m.geom.x2 = np.x; m.geom.y2 = np.y; }
+    } else if (m.mtype === "area") {
+      const i = parseInt(drag.handle.slice(1), 10);
+      m.geom.points[i] = { x: np.x, y: np.y };
+    } else {
+      // point measurement → reposition its center
+      m.geom.x = np.x; m.geom.y = np.y;
+    }
+    renderCanvas();
+    if (snapInfo) showSnapMarker(snapInfo); else hideSnapMarker();
+    updateCoordReadout(np, null, null);
+    return;
+  }
 
   if (drag.mode === "band") {
     drawRubberBand(drag.start, p);
@@ -760,8 +798,18 @@ function onPointerUp(e) {
 
   if (drag.mode === "pan") { svg.classList.remove("panning"); drag = null; return; }
 
-  // NOTE: "move" and "resize" drag modes have been removed — placed
-  // measurements are position-locked. Only pan and box-select remain.
+  // RESIZE finished — re-render everything (updates the left-panel quantities)
+  // and notify the user. A click with no movement just leaves the selection.
+  if (drag.mode === "resize") {
+    hideSnapMarker(); hideCoordReadout();
+    if (drag.moved) {
+      renderAll();
+      const m = getMeasure(drag.mid);
+      if (m) showToast(`Resized — ${measureLabel(m)}`, "info", "fa-solid fa-up-right-and-down-left-from-center");
+    }
+    drag = null;
+    return;
+  }
 
   if (drag.mode === "band") {
     const p = clientToSvg(e.clientX, e.clientY);
