@@ -339,9 +339,11 @@ function joistTicks(g) {
 
 function selectionSvg(m) {
   let s = "";
-  // Resize/move handles are always shown on a selected measurement
-  // (no tool modes — measurements are directly editable when selected).
-  const showHandles = !state.pasteMode;
+  // Measurements are POSITION-LOCKED after placement. We render only the
+  // selection outline (visual feedback) and never any draggable resize/move
+  // handles, so a placed measurement can never be moved or reshaped by the
+  // mouse. The only movable item is the ghost preview during paste mode.
+  const showHandles = false;
   if (isLineGeom(m.mtype)) {
     s += `<line class="sel-outline-line" x1="${m.geom.x1}" y1="${m.geom.y1}" x2="${m.geom.x2}" y2="${m.geom.y2}"/>`;
     if (showHandles) {
@@ -698,16 +700,9 @@ function onPointerDown(e) {
 
   const mod = e.shiftKey || e.ctrlKey || e.metaKey;
 
-  // RESIZE handle? (handles are always shown on a selected measurement)
-  const handleEl = e.target.closest(".handle");
-  if (handleEl && !mod) {
-    const mid = handleEl.dataset.mid, h = handleEl.dataset.handle;
-    const m = getMeasure(mid);
-    drag = { mode: "resize", mid, handle: h, start: p,
-             snapshot: JSON.parse(JSON.stringify(m.geom)), selSet: new Set([mid]) };
-    svg.setPointerCapture(e.pointerId);
-    return;
-  }
+  // NOTE: Resize/move handles are intentionally NOT rendered for placed
+  // measurements (see selectionSvg → showHandles = false). Measurements are
+  // position-locked, so there is no resize-drag entry point here.
 
   // MEASUREMENT body with a modifier → multi-select toggle / range
   const g = e.target.closest(".meas");
